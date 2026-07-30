@@ -1,0 +1,110 @@
+version: '3.17'
+
+tasks:
+  default:
+    desc: 사용 가능한 작업을 표시합니다
+    cmds:
+      - task --list
+
+  setup:
+    desc: 비공개 실행 자산 submodule을 준비합니다
+    cmds:
+      - git submodule update --init --recursive
+    status:
+      - test -f secrets/project/mfds/.env
+      - test -f secrets/project/mfds/config.yaml
+      - test -f secrets/project/mfds/db/schema.sql
+      - test -f secrets/project/mfds/db/query.sql
+
+  build:
+    desc: CLI 바이너리를 빌드합니다
+    sources:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+    generates:
+      - bin/mfds-crawler
+    cmds:
+      - mkdir -p bin
+      - go build -o bin/mfds-crawler .
+
+  test:
+    desc: 전체 Go 테스트를 실행합니다
+    cmds:
+      - go test -count=1 ./...
+
+  test:race:
+    desc: race detector를 활성화해 전체 테스트를 실행합니다
+    cmds:
+      - go test -race -count=1 ./...
+
+  vet:
+    desc: Go 정적 분석을 실행합니다
+    cmds:
+      - go vet ./...
+
+  check:
+    desc: 테스트, 정적 분석과 빌드를 실행합니다
+    deps: [test, vet, build]
+
+  run:
+    desc: TUI 또는 전달한 CLI 명령을 실행합니다
+    cmds:
+      - go run . {{.CLI_ARGS}}
+
+  compose:config:
+    desc: Docker Compose 설정을 검증합니다
+    cmds:
+      - docker compose --env-file secrets/project/mfds/.env config --quiet
+
+  compose:up:
+    desc: MySQL을 시작하고 healthy 상태까지 기다립니다
+    cmds:
+      - docker compose --env-file secrets/project/mfds/.env up -d --wait --wait-timeout 120
+
+  compose:down:
+    desc: MySQL 컨테이너를 중지합니다
+    cmds:
+      - docker compose --env-file secrets/project/mfds/.env down
+
+  db:ping:
+    desc: CLI에서 MySQL 연결을 확인합니다
+    cmds:
+      - go run ./cmd/mfds-crawler db ping
+
+  migrate:
+    desc: MySQL migration을 적용합니다
+    cmds:
+      - go run ./cmd/mfds-crawler migrate
+
+  migrate:status:
+    desc: MySQL migration 상태를 확인합니다
+    cmds:
+      - go run ./cmd/mfds-crawler migrate status
+
+  sqlc:
+    desc: db 스키마와 쿼리에서 Go 코드를 생성합니다
+    cmds:
+      - sqlc generate
+
+  sqlc:check:
+    desc: sqlc 생성 코드가 최신 상태인지 확인합니다
+    cmds:
+      - |
+        snapshot_dir="$(mktemp -d)"
+        trap 'rm -rf "$snapshot_dir"' EXIT
+        cp -R secrets/project/mfds/sqlcgen "$snapshot_dir/sqlcgen"
+        sqlc generate
+        diff -ru "$snapshot_dir/sqlcgen" secrets/project/mfds/sqlcgen
+
+  db:reset:
+    desc: 로컬 mfds_ledger 데이터베이스를 재생성하고 migration을 적용합니다
+    deps: [compose:up]
+    cmds:
+      - |
+        docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "
+          DROP DATABASE IF EXISTS mfds_ledger;
+          CREATE DATABASE mfds_ledger CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+          GRANT ALL PRIVILEGES ON mfds_ledger.* TO '\''mfds'\''@'\''%'\'';
+        "'
+      - task: migrate
