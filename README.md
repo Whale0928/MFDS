@@ -13,7 +13,7 @@ reconciliation.
 - Raw HTTP evidence and append-only observations
 - RCNO count and set validation
 - Repeat verification for multi-page results
-- MySQL, sqlc, Cobra CLI, and Bubble Tea TUI
+- MySQL, sqlc, and Cobra CLI
 
 ## Requirements
 
@@ -28,7 +28,7 @@ reconciliation.
 task setup
 task compose:up
 task migrate
-task run
+task run -- --help
 ```
 
 Start a bounded collection job:

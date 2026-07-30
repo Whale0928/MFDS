@@ -17,7 +17,7 @@ func TestWebListBackfill_필수Flag누락_오류를반환한다(t *testing.T) {
 		{"web", "list-backfill", "--item", "위스키"},
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
-			root, _ := newTestRoot(t, noOpTUI)
+			root, _ := newTestRoot(t)
 			root.SetArgs(args)
 
 			err := root.Execute()
@@ -47,7 +47,7 @@ func TestWebListBackfill_수집성공_결과를한줄출력한다(t *testing.T) 
 			ParsedRows: 20, UniqueRCNOCount: 20, NewRCNOCount: 7,
 		}, nil
 	}
-	root, output := newTestRootWithRunner(t, noOpTUI, &fakeDatabase{}, run)
+	root, output := newTestRootWithRunner(t, &fakeDatabase{}, run)
 	root.SetArgs([]string{"web", "list-backfill", "--item", "위스키", "--date", "2026-07-28"})
 
 	err := root.Execute()
@@ -65,7 +65,7 @@ func TestWebListBackfill_준비실패_성공출력을남기지않는다(t *testi
 	run := func(context.Context, config.Config, weblist.Command) (weblist.Result, error) {
 		return weblist.Result{}, errors.New("transaction 실패")
 	}
-	root, output := newTestRootWithRunner(t, noOpTUI, &fakeDatabase{}, run)
+	root, output := newTestRootWithRunner(t, &fakeDatabase{}, run)
 	root.SetArgs([]string{"web", "list-backfill", "--item", "위스키", "--date", "2026-07-28"})
 
 	err := root.Execute()
@@ -84,7 +84,7 @@ func TestWebListBackfill_Nonterminal결과_완료출력을남기지않는다(t *
 			RunStatus: weblist.RunStatusCreated, PartitionStatus: weblist.PartitionStatusPending,
 		}, nil
 	}
-	root, output := newTestRootWithRunner(t, noOpTUI, &fakeDatabase{}, run)
+	root, output := newTestRootWithRunner(t, &fakeDatabase{}, run)
 	root.SetArgs([]string{"web", "list-backfill", "--item", "위스키", "--date", "2026-07-28"})
 
 	err := root.Execute()

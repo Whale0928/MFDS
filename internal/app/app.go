@@ -20,7 +20,6 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 		OpenDatabase: func(cfg config.DatabaseConfig) (cli.Database, error) {
 			return storemysql.Open(cfg)
 		},
-		RunTUI: cli.RunTUI,
 		RunWebListBackfill: func(
 			ctx context.Context,
 			cfg config.Config,

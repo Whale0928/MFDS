@@ -12,7 +12,7 @@
 - HTTP 원문 증거와 관찰 이력 보존
 - RCNO 수량·집합 검증
 - 다중 페이지 결과 반복 검증
-- MySQL, sqlc, Cobra CLI, Bubble Tea TUI
+- MySQL, sqlc, Cobra CLI
 
 ## 요구 환경
 
@@ -27,7 +27,7 @@
 task setup
 task compose:up
 task migrate
-task run
+task run -- --help
 ```
 
 기간 수집:

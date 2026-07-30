@@ -10,11 +10,9 @@ import (
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
-	"github.com/bottle-note/mfds-crawler/internal/usecase/overview"
 )
 
 type Database interface {
-	overview.Reader
 	Ping(context.Context) error
 	Migrate(context.Context) error
 	MigrationStatus(context.Context) ([]storemysql.MigrationStatus, error)
@@ -24,7 +22,6 @@ type Database interface {
 type Dependencies struct {
 	Loader             *config.Loader
 	OpenDatabase       func(config.DatabaseConfig) (Database, error)
-	RunTUI             func(context.Context, config.Config, TUIDependencies, io.Writer) error
 	RunWebListBackfill RunWebListBackfillFunc
 	RunWebListJob      RunWebListJobFunc
 	Out                io.Writer
@@ -34,7 +31,6 @@ type Dependencies struct {
 func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 	if deps.Loader == nil ||
 		deps.OpenDatabase == nil ||
-		deps.RunTUI == nil ||
 		deps.RunWebListBackfill == nil ||
 		deps.RunWebListJob == nil ||
 		deps.Out == nil ||
@@ -60,10 +56,7 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return deps.RunTUI(cmd.Context(), cfg, TUIDependencies{
-				OpenDatabase:  deps.OpenDatabase,
-				RunWebListJob: deps.RunWebListJob,
-			}, deps.Out)
+			return cmd.Help()
 		},
 	}
 	root.SetOut(deps.Out)

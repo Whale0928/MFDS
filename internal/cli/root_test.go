@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
-	"github.com/bottle-note/mfds-crawler/internal/usecase/overview"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
 
@@ -36,39 +34,25 @@ func (f *fakeDatabase) MigrationStatus(context.Context) ([]storemysql.MigrationS
 	return nil, nil
 }
 
-func (f *fakeDatabase) LoadOverview(context.Context, int32) (overview.Snapshot, error) {
-	return overview.Snapshot{}, nil
-}
-
-func (f *fakeDatabase) LoadRunDetail(context.Context, uint64) (overview.RunDetail, error) {
-	return overview.RunDetail{}, nil
-}
-
 func (f *fakeDatabase) Close() error {
 	return nil
 }
 
-func TestRootCommand_인자가없으면TUI를실행한다(t *testing.T) {
-	var called bool
-	root, output := newTestRoot(t, func(_ context.Context, _ config.Config, deps TUIDependencies, _ io.Writer) error {
-		if deps.OpenDatabase == nil || deps.RunWebListJob == nil {
-			t.Fatal("TUI dependencies are incomplete")
-		}
-		called = true
-		return nil
-	})
+func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
+	root, output := newTestRoot(t)
 	root.SetArgs(nil)
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v, output = %q", err, output.String())
 	}
-	if !called {
-		t.Fatal("TUI was not called")
+	if !strings.Contains(output.String(), "Usage:") ||
+		!strings.Contains(output.String(), "Available Commands:") {
+		t.Fatalf("output = %q", output.String())
 	}
 }
 
 func TestRootCommand_ConfigValidate_검증결과를출력한다(t *testing.T) {
-	root, output := newTestRoot(t, noOpTUI)
+	root, output := newTestRoot(t)
 	root.SetArgs([]string{"config", "validate"})
 
 	if err := root.Execute(); err != nil {
@@ -81,7 +65,7 @@ func TestRootCommand_ConfigValidate_검증결과를출력한다(t *testing.T) {
 
 func TestRootCommand_Migrate_DB를확인하고Migration을적용한다(t *testing.T) {
 	fake := &fakeDatabase{}
-	root, output := newTestRootWithDatabase(t, noOpTUI, fake)
+	root, output := newTestRootWithDatabase(t, fake)
 	root.SetArgs([]string{"migrate"})
 
 	if err := root.Execute(); err != nil {
@@ -96,7 +80,7 @@ func TestRootCommand_Migrate_DB를확인하고Migration을적용한다(t *testin
 }
 
 func TestRootCommand_미구현수집명령은오류를반환한다(t *testing.T) {
-	root, _ := newTestRoot(t, noOpTUI)
+	root, _ := newTestRoot(t)
 	root.SetArgs([]string{"api", "backfill"})
 
 	err := root.Execute()
@@ -108,26 +92,21 @@ func TestRootCommand_미구현수집명령은오류를반환한다(t *testing.T)
 	}
 }
 
-func newTestRoot(
-	t *testing.T,
-	runTUI func(context.Context, config.Config, TUIDependencies, io.Writer) error,
-) (*cobra.Command, *bytes.Buffer) {
+func newTestRoot(t *testing.T) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
-	return newTestRootWithRunner(t, runTUI, &fakeDatabase{}, successfulWebListBackfill)
+	return newTestRootWithRunner(t, &fakeDatabase{}, successfulWebListBackfill)
 }
 
 func newTestRootWithDatabase(
 	t *testing.T,
-	runTUI func(context.Context, config.Config, TUIDependencies, io.Writer) error,
 	database Database,
 ) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
-	return newTestRootWithRunner(t, runTUI, database, successfulWebListBackfill)
+	return newTestRootWithRunner(t, database, successfulWebListBackfill)
 }
 
 func newTestRootWithRunner(
 	t *testing.T,
-	runTUI func(context.Context, config.Config, TUIDependencies, io.Writer) error,
 	database Database,
 	runWebListBackfill RunWebListBackfillFunc,
 ) (*cobra.Command, *bytes.Buffer) {
@@ -139,7 +118,6 @@ func newTestRootWithRunner(
 		OpenDatabase: func(config.DatabaseConfig) (Database, error) {
 			return database, nil
 		},
-		RunTUI:             runTUI,
 		RunWebListBackfill: runWebListBackfill,
 		RunWebListJob: func(context.Context, config.Config, weblist.JobCommand) (weblist.JobResult, error) {
 			return weblist.JobResult{}, nil
@@ -157,10 +135,6 @@ func newTestRootWithRunner(
 		t.Fatal(err)
 	}
 	return root, output
-}
-
-func noOpTUI(context.Context, config.Config, TUIDependencies, io.Writer) error {
-	return nil
 }
 
 func successfulWebListBackfill(
