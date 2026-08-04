@@ -2,17 +2,23 @@
 
 [English](README.md)
 
-식약처 수입식품정보마루의 공개 수입 원장을 수집하는 Go 애플리케이션입니다.
-설정된 주류 4종을 하나의 고정 그룹으로 조회하고 RCNO 기준으로 결과를 검증합니다.
+식약처 수입식품정보마루의 공개 수입주류 원장을 수집하는 Go CLI입니다.
+날짜마다 Task 하나를 생성하고 위스키·브랜디·일반증류주·리큐르와 모든 추가
+페이지를 순차 조회합니다.
 
-## 주요 기능
+## 데이터 구조
 
-- `jobs → tasks → fetches → items` 원장 구조
-- 날짜별 Task 하나에서 설정된 주류 전체 조회
-- HTTP 원문 증거와 관찰 이력 보존
-- RCNO 수량·집합 검증
-- 다중 페이지 결과 반복 검증
-- MySQL, sqlc, Cobra CLI
+```text
+jobs → tasks → fetches → items
+```
+
+- `jobs`: 요청한 수집 기간과 집계 상태
+- `tasks`: 날짜별 재시도 단위
+- `fetches`: HTTP 요청 정보와 압축 원문 응답
+- `items`: RCNO로 대조하는 append-only 관찰 원장
+
+다중 페이지 결과는 다시 수집한 RCNO 집합이 일치할 때 확정합니다. 반복 관찰은
+이후 정규화를 위해 원장에 유지합니다.
 
 ## 요구 환경
 
@@ -28,38 +34,49 @@
 task setup
 task compose:up
 task migrate
-task run -- health
-```
+task health
 
-기간 수집:
-
-```bash
 task run -- collect \
   --from YYYY-MM-DD \
   --to YYYY-MM-DD \
   --workers 2
 ```
 
-설정 우선순위:
+CLI는 `collect`, `health`, `migrate`만 제공합니다.
+
+## 설정
+
+비밀이 아닌 고정 실행값은 `data/config.yaml`에서 관리합니다. MFDS 웹 주소,
+고정 주류 대상, QPS, 재시도 간격, 기본 worker 수와 DB pool 설정이 포함되며
+CLI flag나 환경 변수로 덮어쓰지 않습니다.
+
+DB 환경 변수는 `git.environment-variables/application.go/local.sops.env`에서
+암호화해 관리합니다.
 
 ```text
-DB 접속값: OS 환경 변수 > 복호화된 `.env.local`
+MYSQL_ROOT_PASSWORD  MYSQL_DATABASE  MYSQL_USER  MYSQL_PASSWORD  MYSQL_DSN
+```
 
-고정 실행값: `data/config.yaml`
+OS 환경 변수가 `task setup`이 생성하는 추적 제외 `.env.local`보다 우선합니다.
+Migration과 생성된 sqlc 코드는 `git.secrets`에서 관리합니다.
+
+## 구조
+
+```text
+cmd/                         Cobra 명령
+internal/app/                애플리케이션 조립
+internal/config/             YAML과 DB 환경 변수 로딩
+internal/source/mfdsweb/     HTTP client와 HTML parser
+internal/usecase/weblist/    수집과 RCNO 대조
+internal/store/mysql/        jobs, tasks, fetches, items 저장
+data/config.yaml             비밀이 아닌 고정 실행값
 ```
 
 ## 검증
 
 ```bash
-task test
+task check
 task test:race
-task vet
-task build
 task sqlc:check
+task compose:config
 ```
-
-DB 접속 환경 변수는 `git.environment-variables/application.go/local.sops.env`에서
-암호화해 관리하며 `task setup`이 추적되지 않는 `.env.local`로 복호화합니다.
-migration, 생성된 DB 코드, 스냅샷과 운영 보고서는 `git.secrets` 서브모듈에서
-관리합니다.
-비밀이 아닌 고정 실행 설정은 `data/config.yaml`에서 관리하며 CLI flag나 환경 변수로 덮어쓰지 않습니다.

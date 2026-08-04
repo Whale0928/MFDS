@@ -2,18 +2,23 @@
 
 [한국어](README.ko.md)
 
-Go collector for the public MFDS imported-food registry. It collects four liquor
-categories as one fixed group and preserves request evidence with RCNO-based
-reconciliation.
+Go CLI that collects the public MFDS imported-liquor ledger. A task represents
+one date and sequentially fetches whisky, brandy, general distilled spirits,
+and liqueur, including every additional result page.
 
-## Features
+## Data model
 
-- `jobs → tasks → fetches → items` ledger
-- One date per task across all configured liquor categories
-- Raw HTTP evidence and append-only observations
-- RCNO count and set validation
-- Repeat verification for multi-page results
-- MySQL, sqlc, and Cobra CLI
+```text
+jobs → tasks → fetches → items
+```
+
+- `jobs`: requested collection range and aggregate status
+- `tasks`: one retryable unit per date
+- `fetches`: HTTP request metadata and compressed raw response
+- `items`: append-only observations reconciled by RCNO
+
+Multi-page results are collected again and accepted only after their RCNO sets
+match. Repeated observations remain in the ledger for later normalization.
 
 ## Requirements
 
@@ -29,38 +34,50 @@ reconciliation.
 task setup
 task compose:up
 task migrate
-task run -- health
-```
+task health
 
-Start a bounded collection job:
-
-```bash
 task run -- collect \
   --from YYYY-MM-DD \
   --to YYYY-MM-DD \
   --workers 2
 ```
 
-Configuration precedence:
+The CLI exposes only `collect`, `health`, and `migrate`.
+
+## Configuration
+
+Non-secret runtime constants are tracked in `data/config.yaml`. They include the
+MFDS web endpoint, fixed liquor targets, QPS, retry delays, worker defaults, and
+database pool settings. CLI flags and environment variables do not override
+these values.
+
+Database environment variables are encrypted at
+`git.environment-variables/application.go/local.sops.env`:
 
 ```text
-Database connection values: OS environment > decrypted `.env.local`
+MYSQL_ROOT_PASSWORD  MYSQL_DATABASE  MYSQL_USER  MYSQL_PASSWORD  MYSQL_DSN
+```
 
-Fixed runtime values: `data/config.yaml`
+OS environment values take precedence over the ignored `.env.local` generated
+by `task setup`. Migrations and generated sqlc code live in `git.secrets`.
+
+## Structure
+
+```text
+cmd/                         Cobra commands
+internal/app/                application wiring
+internal/config/             YAML and database environment loading
+internal/source/mfdsweb/     HTTP client and HTML parser
+internal/usecase/weblist/    collection and RCNO reconciliation
+internal/store/mysql/        jobs, tasks, fetches, and items persistence
+data/config.yaml             non-secret runtime constants
 ```
 
 ## Verify
 
 ```bash
-task test
+task check
 task test:race
-task vet
-task build
 task sqlc:check
+task compose:config
 ```
-
-Database connection environment variables are encrypted at
-`git.environment-variables/application.go/local.sops.env`. `task setup` decrypts
-them into the ignored `.env.local` file. Migrations, generated database code,
-snapshots, and operational reports remain in the `git.secrets` submodule.
-Non-secret runtime constants are tracked in `data/config.yaml` and are not overridden by CLI flags or environment variables.
