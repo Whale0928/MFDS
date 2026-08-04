@@ -28,13 +28,13 @@ reconciliation.
 task setup
 task compose:up
 task migrate
-task run -- --help
+task run -- health
 ```
 
 Start a bounded collection job:
 
 ```bash
-task run -- web list-job \
+task run -- collect \
   --from YYYY-MM-DD \
   --to YYYY-MM-DD \
   --workers 2

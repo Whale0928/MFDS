@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
-	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
 
@@ -30,10 +29,6 @@ func (f *fakeDatabase) Migrate(context.Context) error {
 	return nil
 }
 
-func (f *fakeDatabase) MigrationStatus(context.Context) ([]storemysql.MigrationStatus, error) {
-	return nil, nil
-}
-
 func (f *fakeDatabase) Close() error {
 	return nil
 }
@@ -49,16 +44,30 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
+	for _, command := range []string{"collect", "health", "migrate"} {
+		if !strings.Contains(output.String(), command) {
+			t.Fatalf("command %q missing from output = %q", command, output.String())
+		}
+	}
+	for _, removed := range []string{"all", "api", "completion", "config", "db", "run", "verify", "web"} {
+		if strings.Contains(output.String(), "\n  "+removed+" ") {
+			t.Fatalf("removed command %q remains in output = %q", removed, output.String())
+		}
+	}
 }
 
-func TestRootCommand_ConfigValidate_검증결과를출력한다(t *testing.T) {
-	root, output := newTestRoot(t)
-	root.SetArgs([]string{"config", "validate"})
+func TestRootCommand_Health_설정과DB연결결과를출력한다(t *testing.T) {
+	fake := &fakeDatabase{}
+	root, output := newTestRootWithDatabase(t, fake)
+	root.SetArgs([]string{"health"})
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if !strings.Contains(output.String(), "설정 정상: targets=4") {
+	if !fake.pinged {
+		t.Fatal("Ping() was not called")
+	}
+	if !strings.Contains(output.String(), "health 정상: config=ok mysql=ok targets=4") {
 		t.Fatalf("output = %q", output.String())
 	}
 }
@@ -79,22 +88,9 @@ func TestRootCommand_Migrate_DB를확인하고Migration을적용한다(t *testin
 	}
 }
 
-func TestRootCommand_미구현수집명령은오류를반환한다(t *testing.T) {
-	root, _ := newTestRoot(t)
-	root.SetArgs([]string{"api", "backfill"})
-
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("Execute() error = nil")
-	}
-	if !strings.Contains(err.Error(), "아직 구현되지 않았습니다") {
-		t.Fatalf("error = %q", err)
-	}
-}
-
 func newTestRoot(t *testing.T) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
-	return newTestRootWithRunner(t, &fakeDatabase{}, successfulWebListBackfill)
+	return newTestRootWithRunner(t, &fakeDatabase{}, successfulWebListJob)
 }
 
 func newTestRootWithDatabase(
@@ -102,13 +98,13 @@ func newTestRootWithDatabase(
 	database Database,
 ) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
-	return newTestRootWithRunner(t, database, successfulWebListBackfill)
+	return newTestRootWithRunner(t, database, successfulWebListJob)
 }
 
 func newTestRootWithRunner(
 	t *testing.T,
 	database Database,
-	runWebListBackfill RunWebListBackfillFunc,
+	runWebListJob RunWebListJobFunc,
 ) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
 	configFile, envFile := writeCLIConfig(t)
@@ -118,12 +114,9 @@ func newTestRootWithRunner(
 		OpenDatabase: func(config.DatabaseConfig) (Database, error) {
 			return database, nil
 		},
-		RunWebListBackfill: runWebListBackfill,
-		RunWebListJob: func(context.Context, config.Config, weblist.JobCommand) (weblist.JobResult, error) {
-			return weblist.JobResult{}, nil
-		},
-		Out:    output,
-		ErrOut: output,
+		RunWebListJob: runWebListJob,
+		Out:           output,
+		ErrOut:        output,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -137,12 +130,12 @@ func newTestRootWithRunner(
 	return root, output
 }
 
-func successfulWebListBackfill(
+func successfulWebListJob(
 	context.Context,
 	config.Config,
-	weblist.Command,
-) (weblist.Result, error) {
-	return weblist.Result{}, nil
+	weblist.JobCommand,
+) (weblist.JobResult, error) {
+	return weblist.JobResult{}, nil
 }
 
 func writeCLIConfig(t *testing.T) (string, string) {

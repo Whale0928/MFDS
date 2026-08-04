@@ -27,13 +27,13 @@
 task setup
 task compose:up
 task migrate
-task run -- --help
+task run -- health
 ```
 
 기간 수집:
 
 ```bash
-task run -- web list-job \
+task run -- collect \
   --from YYYY-MM-DD \
   --to YYYY-MM-DD \
   --workers 2

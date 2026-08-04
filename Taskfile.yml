@@ -67,20 +67,15 @@ tasks:
     cmds:
       - docker compose --env-file secrets/project/mfds/.env down
 
-  db:ping:
-    desc: CLI에서 MySQL 연결을 확인합니다
+  health:
+    desc: CLI 설정과 MySQL 연결을 확인합니다
     cmds:
-      - go run ./cmd/mfds-crawler db ping
+      - go run ./cmd/mfds-crawler health
 
   migrate:
     desc: MySQL migration을 적용합니다
     cmds:
       - go run ./cmd/mfds-crawler migrate
-
-  migrate:status:
-    desc: MySQL migration 상태를 확인합니다
-    cmds:
-      - go run ./cmd/mfds-crawler migrate status
 
   sqlc:
     desc: db 스키마와 쿼리에서 Go 코드를 생성합니다
