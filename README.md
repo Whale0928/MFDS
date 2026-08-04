@@ -2,20 +2,23 @@
 
 [한국어](README.ko.md)
 
-Go CLI that collects the public MFDS imported-liquor ledger. A task represents
+Go CLI that collects the public MFDS imported-liquor ledger and derives
+non-destructive normalization results per RCNO. A collection task represents
 one date and sequentially fetches whisky, brandy, general distilled spirits,
 and liqueur, including every additional result page.
 
 ## Data model
 
 ```text
-jobs → tasks → fetches → items
+jobs → tasks → fetches → items → declarations
 ```
 
 - `jobs`: requested collection range and aggregate status
 - `tasks`: one retryable unit per date
 - `fetches`: HTTP request metadata and compressed raw response
 - `items`: append-only observations reconciled by RCNO
+- `declarations`: one latest source reference and normalization result per RCNO
+- `declaration_details`: read view joining source observations and derived values
 
 Multi-page results are collected again and accepted only after their RCNO sets
 match. Repeated observations remain in the ledger for later normalization.
@@ -40,16 +43,27 @@ task run -- collect \
   --from YYYY-MM-DD \
   --to YYYY-MM-DD \
   --workers 2
+
+task run -- normalize
+task run -- normalize --limit 100
+task run -- normalize --rcno RCNO
+task run -- normalize --dry-run
 ```
 
-The CLI exposes only `collect`, `health`, and `migrate`.
+`normalize` processes 100 rows by default. `--rcno` force-normalizes one row
+regardless of its current state, while `--dry-run` changes no ledger row,
+declaration, lease, or timestamp. States are `PENDING`, `STALE`, `NORMALIZED`,
+`PARTIAL`, `REVIEW_REQUIRED`, and `UNPARSED`. Source `items` are never updated
+or deleted.
+After fixing a system error, recover an RCNO that exhausted its retry limit with
+`normalize --rcno RCNO`.
 
 ## Configuration
 
 Non-secret runtime constants are tracked in `data/config.yaml`. They include the
-MFDS web endpoint, fixed liquor targets, QPS, retry delays, worker defaults, and
-database pool settings. CLI flags and environment variables do not override
-these values.
+MFDS web endpoint, fixed liquor targets, QPS, retry delays, worker defaults,
+normalization batch/lease constants, and database pool settings. Only the
+normalization batch size can be overridden with `normalize --limit`.
 
 Database environment variables are encrypted at
 `git.environment-variables/application.go/local.sops.env`:
@@ -69,7 +83,9 @@ internal/app/                application wiring
 internal/config/             YAML and database environment loading
 internal/source/mfdsweb/     HTTP client and HTML parser
 internal/usecase/weblist/    collection and RCNO reconciliation
-internal/store/mysql/        jobs, tasks, fetches, and items persistence
+internal/normalization/      pure normalization rules and parsers
+internal/usecase/normalization/ normalization batch and state transitions
+internal/store/mysql/        ledger and normalization persistence
 data/config.yaml             non-secret runtime constants
 ```
 

@@ -3,11 +3,12 @@ package config
 import "time"
 
 type Config struct {
-	Timezone string         `mapstructure:"timezone"`
-	Web      WebConfig      `mapstructure:"web"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Retry    RetryConfig    `mapstructure:"retry"`
-	Targets  []TargetItem   `mapstructure:"targets"`
+	Timezone      string              `mapstructure:"timezone"`
+	Web           WebConfig           `mapstructure:"web"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Retry         RetryConfig         `mapstructure:"retry"`
+	Normalization NormalizationConfig `mapstructure:"normalization"`
+	Targets       []TargetItem        `mapstructure:"targets"`
 }
 
 type WebConfig struct {
@@ -28,6 +29,13 @@ type DatabaseConfig struct {
 type RetryConfig struct {
 	MaxAttempts int             `mapstructure:"max_attempts"`
 	Delays      []time.Duration `mapstructure:"delays"`
+}
+
+type NormalizationConfig struct {
+	RunLimit      int           `mapstructure:"run_limit"`
+	LeaseDuration time.Duration `mapstructure:"lease_duration"`
+	MaxAttempts   int           `mapstructure:"max_attempts"`
+	RetryDelay    time.Duration `mapstructure:"retry_delay"`
 }
 
 type TargetItem struct {

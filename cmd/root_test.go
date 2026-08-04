@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
+	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
 
@@ -44,7 +45,7 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
-	for _, command := range []string{"collect", "health", "migrate"} {
+	for _, command := range []string{"collect", "health", "migrate", "normalize"} {
 		if !strings.Contains(output.String(), command) {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
@@ -119,15 +120,24 @@ func newTestRootWithRunner(
 		OpenDatabase: func(config.DatabaseConfig) (Database, error) {
 			return database, nil
 		},
-		RunWebListJob: runWebListJob,
-		Out:           output,
-		ErrOut:        output,
+		RunWebListJob:    runWebListJob,
+		RunNormalization: successfulNormalization,
+		Out:              output,
+		ErrOut:           output,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(filepath.Dir(filepath.Dir(configFile)))
 	return root, output
+}
+
+func successfulNormalization(
+	context.Context,
+	config.Config,
+	normalization.Command,
+) (normalization.Summary, error) {
+	return normalization.Summary{}, nil
 }
 
 func successfulWebListJob(
@@ -162,6 +172,11 @@ database:
 retry:
   max_attempts: 3
   delays: [2s, 5s, 15s]
+normalization:
+  run_limit: 100
+  lease_duration: 5m
+  max_attempts: 3
+  retry_delay: 5m
 targets:
   - {name: 위스키, code: C0314210000000000000}
   - {name: 브랜디, code: C0314220000000000000}

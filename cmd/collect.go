@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
+	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
 
@@ -16,6 +17,12 @@ type RunWebListJobFunc func(
 	config.Config,
 	weblist.JobCommand,
 ) (weblist.JobResult, error)
+
+type RunNormalizationFunc func(
+	context.Context,
+	config.Config,
+	normalization.Command,
+) (normalization.Summary, error)
 
 func newCollectCommand(
 	getConfig func() config.Config,

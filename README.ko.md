@@ -2,20 +2,23 @@
 
 [English](README.md)
 
-식약처 수입식품정보마루의 공개 수입주류 원장을 수집하는 Go CLI입니다.
+식약처 수입식품정보마루의 공개 수입주류 원장을 수집하고 RCNO별로 비파괴
+정제하는 Go CLI입니다.
 날짜마다 Task 하나를 생성하고 위스키·브랜디·일반증류주·리큐르와 모든 추가
 페이지를 순차 조회합니다.
 
 ## 데이터 구조
 
 ```text
-jobs → tasks → fetches → items
+jobs → tasks → fetches → items → declarations
 ```
 
 - `jobs`: 요청한 수집 기간과 집계 상태
 - `tasks`: 날짜별 재시도 단위
 - `fetches`: HTTP 요청 정보와 압축 원문 응답
 - `items`: RCNO로 대조하는 append-only 관찰 원장
+- `declarations`: RCNO당 1행인 최신 원본 참조와 정제 결과
+- `declaration_details`: 원본 관찰과 정제 결과를 함께 읽는 View
 
 다중 페이지 결과는 다시 수집한 RCNO 집합이 일치할 때 확정합니다. 반복 관찰은
 이후 정규화를 위해 원장에 유지합니다.
@@ -40,15 +43,26 @@ task run -- collect \
   --from YYYY-MM-DD \
   --to YYYY-MM-DD \
   --workers 2
+
+task run -- normalize
+task run -- normalize --limit 100
+task run -- normalize --rcno RCNO
+task run -- normalize --dry-run
 ```
 
-CLI는 `collect`, `health`, `migrate`만 제공합니다.
+`normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
+재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
+정제 상태는 `PENDING`, `STALE`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`,
+`UNPARSED`로 구분합니다. 원문 `items`는 수정하거나 삭제하지 않습니다.
+시스템 오류로 최대 재시도 횟수를 소진한 RCNO는 원인을 해결한 뒤
+`normalize --rcno RCNO`로 강제 재정제합니다.
 
 ## 설정
 
 비밀이 아닌 고정 실행값은 `data/config.yaml`에서 관리합니다. MFDS 웹 주소,
-고정 주류 대상, QPS, 재시도 간격, 기본 worker 수와 DB pool 설정이 포함되며
-CLI flag나 환경 변수로 덮어쓰지 않습니다.
+고정 주류 대상, QPS, 재시도 간격, 기본 worker 수, 정제 batch/lease 상수와 DB
+pool 설정이 포함됩니다. 정제 batch 크기는 `normalize --limit`으로만 변경할 수
+있습니다.
 
 DB 환경 변수는 `git.environment-variables/application.go/local.sops.env`에서
 암호화해 관리합니다.
@@ -68,7 +82,9 @@ internal/app/                애플리케이션 조립
 internal/config/             YAML과 DB 환경 변수 로딩
 internal/source/mfdsweb/     HTTP client와 HTML parser
 internal/usecase/weblist/    수집과 RCNO 대조
-internal/store/mysql/        jobs, tasks, fetches, items 저장
+internal/normalization/      순수 정제 규칙과 파서
+internal/usecase/normalization/ 정제 batch와 상태 전이
+internal/store/mysql/        원장과 정제 결과 저장
 data/config.yaml             비밀이 아닌 고정 실행값
 ```
 

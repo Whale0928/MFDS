@@ -99,6 +99,11 @@ database:
 retry:
   max_attempts: 3
   delays: [2s, 5s, 15s]
+normalization:
+  run_limit: 100
+  lease_duration: 5m
+  max_attempts: 3
+  retry_delay: 5m
 targets:
   - {name: 위스키, code: C0314210000000000000}
   - {name: 브랜디, code: C0314220000000000000}

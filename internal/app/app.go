@@ -59,8 +59,9 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			}
 			return service.ExecuteJob(ctx, command)
 		},
-		Out:    out,
-		ErrOut: errOut,
+		RunNormalization: runNormalization,
+		Out:              out,
+		ErrOut:           errOut,
 	})
 	if err != nil {
 		return err

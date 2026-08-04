@@ -29,6 +29,10 @@ func (c Config) Validate() error {
 	if c.Database.MaxOpenConns <= 0 || c.Database.MaxIdleConns < 0 || c.Database.MaxIdleConns > c.Database.MaxOpenConns {
 		problems = append(problems, errors.New("DB connection pool 설정이 유효하지 않습니다"))
 	}
+	if c.Normalization.RunLimit <= 0 || c.Normalization.LeaseDuration <= 0 ||
+		c.Normalization.MaxAttempts <= 0 || c.Normalization.RetryDelay <= 0 {
+		problems = append(problems, errors.New("normalization 운영 설정은 모두 0보다 커야 합니다"))
+	}
 	if err := validateTargets(c.Targets); err != nil {
 		problems = append(problems, err)
 	}

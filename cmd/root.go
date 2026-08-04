@@ -18,17 +18,19 @@ type Database interface {
 }
 
 type Dependencies struct {
-	Loader        *config.Loader
-	OpenDatabase  func(config.DatabaseConfig) (Database, error)
-	RunWebListJob RunWebListJobFunc
-	Out           io.Writer
-	ErrOut        io.Writer
+	Loader           *config.Loader
+	OpenDatabase     func(config.DatabaseConfig) (Database, error)
+	RunWebListJob    RunWebListJobFunc
+	RunNormalization RunNormalizationFunc
+	Out              io.Writer
+	ErrOut           io.Writer
 }
 
 func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 	if deps.Loader == nil ||
 		deps.OpenDatabase == nil ||
 		deps.RunWebListJob == nil ||
+		deps.RunNormalization == nil ||
 		deps.Out == nil ||
 		deps.ErrOut == nil {
 		return nil, fmt.Errorf("CLI 의존성이 모두 필요합니다")
@@ -65,6 +67,7 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 	if err := addCollectorContract(root, getConfig, deps.RunWebListJob); err != nil {
 		return nil, err
 	}
+	root.AddCommand(newNormalizeCommand(getConfig, deps.RunNormalization, deps.Out))
 	return root, nil
 }
 
