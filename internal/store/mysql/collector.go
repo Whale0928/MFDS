@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/bottle-note/mfds-crawler/internal/source/mfdsweb"
@@ -26,11 +25,11 @@ func (s *Store) StartWebListJob(
 		`, params.FromDate, params.ToDate, params.ConfigJSON, params.PageSize,
 			params.ToDate, params.FromDate, params.StartedAt)
 		if err != nil {
-			return fmt.Errorf("Job 생성 실패: %w", err)
+			return fmt.Errorf("job 생성 실패: %w", err)
 		}
 		id, err := result.LastInsertId()
 		if err != nil || id <= 0 {
-			return fmt.Errorf("Job ID 확인 실패: id=%d: %w", id, err)
+			return fmt.Errorf("job ID 확인 실패: id=%d: %w", id, err)
 		}
 		record.RunID = uint64(id)
 		for date := params.FromDate; !date.After(params.ToDate); date = date.AddDate(0, 0, 1) {
@@ -92,7 +91,7 @@ func (s *Store) ClaimTask(
 			UPDATE jobs SET status = 'RUNNING', started_at = COALESCE(started_at, ?)
 			WHERE id = ? AND status = 'CREATED'
 		`, params.Now, params.RunID); updateErr != nil {
-			return fmt.Errorf("Job RUNNING 전이 실패: %w", updateErr)
+			return fmt.Errorf("job RUNNING 전이 실패: %w", updateErr)
 		}
 		task = weblist.DateTask{
 			RunID: params.RunID, TaskID: taskID, Attempt: attempts + 1,
@@ -115,7 +114,7 @@ func (s *Store) RenewTask(
 		  AND lease_owner = ? AND attempts = ? AND lease_until >= NOW(6)
 	`, leaseUntil, task.TaskID, task.RunID, task.Owner, task.Attempt)
 	if err != nil {
-		return fmt.Errorf("Task lease 갱신 실패: %w", err)
+		return fmt.Errorf("task lease 갱신 실패: %w", err)
 	}
 	return requireLease(result, "Task lease 갱신")
 }
@@ -156,7 +155,7 @@ func (s *Store) CommitFetch(ctx context.Context, params weblist.CommitFetchParam
 				row.CanonicalValuesJSON, string(row.RawRowHTML), row.RawRowSHA256[:],
 				row.SemanticSHA256[:], mfdsweb.ParserVersion, params.ObservedAt,
 			); err != nil {
-				return fmt.Errorf("Item row %d 저장 실패: %w", row.RowNo, err)
+				return fmt.Errorf("item row %d 저장 실패: %w", row.RowNo, err)
 			}
 		}
 		return refreshTaskCounters(ctx, tx, params.Task.TaskID)
@@ -186,26 +185,7 @@ func (s *Store) LoadTaskAttemptEvidence(
 	ctx context.Context,
 	task weblist.DateTask,
 ) ([]weblist.TaskAttemptEvidence, error) {
-	attempts := make(map[uint32]*weblist.TaskAttemptEvidence)
-	itemIndexes := make(map[uint32]map[string]int)
-	ensureItem := func(attempt uint32, itemCode, itemName string) *weblist.AttemptItemEvidence {
-		evidence, exists := attempts[attempt]
-		if !exists {
-			evidence = &weblist.TaskAttemptEvidence{Attempt: attempt}
-			attempts[attempt] = evidence
-			itemIndexes[attempt] = make(map[string]int)
-		}
-		index, exists := itemIndexes[attempt][itemCode]
-		if !exists {
-			index = len(evidence.Items)
-			evidence.Items = append(evidence.Items, weblist.AttemptItemEvidence{
-				ItemCode: itemCode,
-				ItemName: itemName,
-			})
-			itemIndexes[attempt][itemCode] = index
-		}
-		return &evidence.Items[index]
-	}
+	evidenceBuilder := newTaskAttemptEvidenceBuilder()
 
 	pageRows, err := s.db.QueryContext(ctx, `
 		SELECT attempt_no, item_code, item_name, page_no, status,
@@ -215,7 +195,7 @@ func (s *Store) LoadTaskAttemptEvidence(
 		ORDER BY attempt_no, item_code, page_no, id
 	`, task.TaskID, task.RunID, task.Attempt)
 	if err != nil {
-		return nil, fmt.Errorf("Task attempt page 증거 조회 실패: %w", err)
+		return nil, fmt.Errorf("task attempt page 증거 조회 실패: %w", err)
 	}
 	for pageRows.Next() {
 		var attempt, pageNo, parsedRows uint32
@@ -230,10 +210,12 @@ func (s *Store) LoadTaskAttemptEvidence(
 			&total,
 			&parsedRows,
 		); err != nil {
-			_ = pageRows.Close()
-			return nil, fmt.Errorf("Task attempt page 증거 scan 실패: %w", err)
+			return nil, errors.Join(
+				fmt.Errorf("task attempt page 증거 scan 실패: %w", err),
+				closeRows(pageRows, "task attempt page 증거"),
+			)
 		}
-		item := ensureItem(attempt, itemCode, itemName)
+		item := evidenceBuilder.ensureItem(attempt, itemCode, itemName)
 		item.Pages = append(item.Pages, weblist.AttemptPageEvidence{
 			PageNo:     pageNo,
 			Status:     status,
@@ -241,11 +223,11 @@ func (s *Store) LoadTaskAttemptEvidence(
 			ParsedRows: parsedRows,
 		})
 	}
-	if err := pageRows.Close(); err != nil {
-		return nil, fmt.Errorf("Task attempt page 증거 close 실패: %w", err)
+	if err := closeRows(pageRows, "task attempt page 증거"); err != nil {
+		return nil, err
 	}
 	if err := pageRows.Err(); err != nil {
-		return nil, fmt.Errorf("Task attempt page 증거 순회 실패: %w", err)
+		return nil, fmt.Errorf("task attempt page 증거 순회 실패: %w", err)
 	}
 
 	itemRows, err := s.db.QueryContext(ctx, `
@@ -256,36 +238,28 @@ func (s *Store) LoadTaskAttemptEvidence(
 		ORDER BY f.attempt_no, f.item_code, i.rcno, i.id
 	`, task.TaskID, task.RunID, task.Attempt)
 	if err != nil {
-		return nil, fmt.Errorf("Task attempt RCNO 증거 조회 실패: %w", err)
+		return nil, fmt.Errorf("task attempt RCNO 증거 조회 실패: %w", err)
 	}
 	for itemRows.Next() {
 		var attempt uint32
 		var itemCode, itemName, rcno string
 		if err := itemRows.Scan(&attempt, &itemCode, &itemName, &rcno); err != nil {
-			_ = itemRows.Close()
-			return nil, fmt.Errorf("Task attempt RCNO 증거 scan 실패: %w", err)
+			return nil, errors.Join(
+				fmt.Errorf("task attempt RCNO 증거 scan 실패: %w", err),
+				closeRows(itemRows, "task attempt RCNO 증거"),
+			)
 		}
-		item := ensureItem(attempt, itemCode, itemName)
+		item := evidenceBuilder.ensureItem(attempt, itemCode, itemName)
 		item.RCNOs = append(item.RCNOs, rcno)
 	}
-	if err := itemRows.Close(); err != nil {
-		return nil, fmt.Errorf("Task attempt RCNO 증거 close 실패: %w", err)
+	if err := closeRows(itemRows, "task attempt RCNO 증거"); err != nil {
+		return nil, err
 	}
 	if err := itemRows.Err(); err != nil {
-		return nil, fmt.Errorf("Task attempt RCNO 증거 순회 실패: %w", err)
+		return nil, fmt.Errorf("task attempt RCNO 증거 순회 실패: %w", err)
 	}
 
-	result := make([]weblist.TaskAttemptEvidence, 0, len(attempts))
-	for _, evidence := range attempts {
-		sort.Slice(evidence.Items, func(left, right int) bool {
-			return evidence.Items[left].ItemCode < evidence.Items[right].ItemCode
-		})
-		result = append(result, *evidence)
-	}
-	sort.Slice(result, func(left, right int) bool {
-		return result[left].Attempt < result[right].Attempt
-	})
-	return result, nil
+	return evidenceBuilder.result(), nil
 }
 
 func insertFetch(
@@ -325,13 +299,20 @@ func insertFetch(
 		nullString(errorKind), nullString(weblist.SanitizeErrorMessage(errorMessage)),
 	)
 	if err != nil {
-		return 0, fmt.Errorf("Fetch 저장 실패: %w", err)
+		return 0, fmt.Errorf("fetch 저장 실패: %w", err)
 	}
 	id, err := result.LastInsertId()
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("Fetch ID 확인 실패: id=%d: %w", id, err)
+		return 0, fmt.Errorf("fetch ID 확인 실패: id=%d: %w", id, err)
 	}
 	return uint64(id), nil
+}
+
+func closeRows(rows *sql.Rows, operation string) error {
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("%s close 실패: %w", operation, err)
+	}
+	return nil
 }
 
 func (s *Store) CompleteTask(ctx context.Context, task weblist.DateTask) error {
@@ -350,7 +331,7 @@ func (s *Store) CompleteTask(ctx context.Context, task weblist.DateTask) error {
 			  AND lease_owner = ? AND attempts = ?
 		`, task.TaskID, task.RunID, task.Owner, task.Attempt)
 		if err != nil {
-			return fmt.Errorf("Task 완료 실패: %w", err)
+			return fmt.Errorf("task 완료 실패: %w", err)
 		}
 		return requireLease(result, "Task 완료")
 	})
@@ -373,7 +354,7 @@ func (s *Store) FailTask(ctx context.Context, params weblist.FailTaskParams) err
 	`, status, nextAttempt, params.ErrorMessage, status,
 		params.Task.TaskID, params.Task.RunID, params.Task.Owner, params.Task.Attempt)
 	if err != nil {
-		return fmt.Errorf("Task 실패 전이 실패: %w", err)
+		return fmt.Errorf("task 실패 전이 실패: %w", err)
 	}
 	return requireLease(result, "Task 실패 전이")
 }
@@ -384,7 +365,7 @@ func (s *Store) RequestCancellation(ctx context.Context, jobID uint64) error {
 		WHERE id = ? AND status IN ('CREATED', 'RUNNING')
 	`, jobID)
 	if err != nil {
-		return fmt.Errorf("Job 취소 요청 실패: %w", err)
+		return fmt.Errorf("job 취소 요청 실패: %w", err)
 	}
 	return nil
 }
@@ -399,7 +380,7 @@ func (s *Store) FinalizeJob(
 		if err := tx.QueryRowContext(ctx, `
 			SELECT status, cancel_requested_at FROM jobs WHERE id = ? FOR UPDATE
 		`, jobID).Scan(&status, &cancelRequested); err != nil {
-			return fmt.Errorf("Job finalization lock 실패: %w", err)
+			return fmt.Errorf("job finalization lock 실패: %w", err)
 		}
 		if status == weblist.RunStatusCompleted || status == weblist.RunStatusPartialFailed ||
 			status == weblist.RunStatusCancelled {
@@ -422,7 +403,7 @@ func (s *Store) FinalizeJob(
 			       SUM(status IN ('PENDING', 'LEASED', 'RETRY_WAIT')), MAX(last_error)
 			FROM tasks WHERE job_id = ?
 		`, jobID).Scan(&total, &done, &failed, &active, &lastError); err != nil {
-			return fmt.Errorf("Job Task 집계 실패: %w", err)
+			return fmt.Errorf("job task 집계 실패: %w", err)
 		}
 		if active > 0 {
 			return refreshJobCounters(ctx, tx, jobID)
@@ -443,7 +424,7 @@ func (s *Store) FinalizeJob(
 			WHERE id = ? AND status IN ('CREATED', 'RUNNING')
 		`, status, total, done, lastError, finishedAt, jobID)
 		if err != nil {
-			return fmt.Errorf("Job 완료 실패: %w", err)
+			return fmt.Errorf("job 완료 실패: %w", err)
 		}
 		if err := requireOne(result, "Job 완료"); err != nil {
 			return err
@@ -481,7 +462,7 @@ func (s *Store) LoadJobResult(
 		&result.CompletedPartitions, &failed, &result.FetchedPages, &result.ParsedRows,
 		&result.UniqueRCNOCount, &result.NewRCNOCount)
 	if err != nil {
-		return result, fmt.Errorf("Job 결과 조회 실패: %w", err)
+		return result, fmt.Errorf("job 결과 조회 실패: %w", err)
 	}
 	result.FailedPartitions = failed
 	rows, err := s.db.QueryContext(ctx, `
@@ -490,9 +471,11 @@ func (s *Store) LoadJobResult(
 		FROM tasks WHERE job_id = ? ORDER BY process_date, id
 	`, jobID)
 	if err != nil {
-		return result, fmt.Errorf("Job Task 결과 조회 실패: %w", err)
+		return result, fmt.Errorf("job task 결과 조회 실패: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = errors.Join(err, rows.Close())
+	}()
 	for rows.Next() {
 		var unit weblist.Result
 		if err := rows.Scan(&unit.PartitionID, &unit.ProcessDate, &unit.PartitionStatus,
@@ -518,7 +501,7 @@ func lockTaskLease(ctx context.Context, tx *sql.Tx, task weblist.DateTask) error
 		return weblist.ErrLeaseLost
 	}
 	if err != nil {
-		return fmt.Errorf("Task lease 확인 실패: %w", err)
+		return fmt.Errorf("task lease 확인 실패: %w", err)
 	}
 	return nil
 }
@@ -555,7 +538,7 @@ func refreshTaskCounters(ctx context.Context, tx *sql.Tx, taskID uint64) error {
 		WHERE t.id = ?
 	`, taskID)
 	if err != nil {
-		return fmt.Errorf("Task counter 갱신 실패: %w", err)
+		return fmt.Errorf("task counter 갱신 실패: %w", err)
 	}
 	return nil
 }
@@ -597,7 +580,7 @@ func refreshJobCounters(ctx context.Context, tx *sql.Tx, jobID uint64) error {
 		WHERE j.id = ?
 	`, jobID)
 	if err != nil {
-		return fmt.Errorf("Job counter 갱신 실패: %w", err)
+		return fmt.Errorf("job counter 갱신 실패: %w", err)
 	}
 	return nil
 }

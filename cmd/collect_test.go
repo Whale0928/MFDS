@@ -1,4 +1,4 @@
-package cli
+package cmd
 
 import (
 	"context"
@@ -61,7 +61,7 @@ func TestCollect_여러품목과기간을전달하고집계결과를출력한다
 	if err := command.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if captured.Workers != 12 || len(captured.ItemNames) != 0 ||
+	if captured.Workers != 12 ||
 		captured.FromDate != "2023-07-03" || captured.ToDate != "2023-08-02" {
 		t.Fatalf("captured = %+v", captured)
 	}

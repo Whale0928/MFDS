@@ -20,8 +20,6 @@ type Service struct {
 	pageSize    int
 	location    *time.Location
 	webBaseURL  string
-	proxyMode   string
-	proxyLabel  string
 	now         func() time.Time
 	rateMu      sync.Mutex
 	nextFetch   time.Time
@@ -36,8 +34,6 @@ type jobConfigSnapshot struct {
 	Items      []Target `json:"items"`
 	PageSize   int      `json:"page_size"`
 	WebBaseURL string   `json:"web_base_url"`
-	ProxyMode  string   `json:"proxy_mode"`
-	ProxyLabel string   `json:"proxy_label"`
 }
 
 func NewService(store Store, source ListSource, options Options) (*Service, error) {
@@ -84,8 +80,7 @@ func NewService(store Store, source ListSource, options Options) (*Service, erro
 	return &Service{
 		store: store, source: source, targets: append([]Target(nil), options.Targets...),
 		pageSize: options.PageSize, location: options.Location, webBaseURL: baseURL,
-		proxyMode: options.ProxyMode, proxyLabel: options.ProxyLabel, now: now,
-		fetchGap: fetchGap, processID: processID, maxAttempts: maxAttempts,
+		now: now, fetchGap: fetchGap, processID: processID, maxAttempts: maxAttempts,
 		retryDelays: retryDelays,
 	}, nil
 }
@@ -101,19 +96,6 @@ func canonicalWebBaseURL(rawURL string) (string, error) {
 	return parsed.String(), nil
 }
 
-func (s *Service) Execute(ctx context.Context, command Command) (Result, error) {
-	job, err := s.ExecuteJob(ctx, JobCommand{
-		FromDate: command.ProcessDate,
-		ToDate:   command.ProcessDate,
-		Workers:  1,
-	})
-	result := Result{RunID: job.RunID, RunStatus: job.Status}
-	if len(job.Units) > 0 {
-		result = job.Units[0]
-	}
-	return result, err
-}
-
 func (s *Service) ExecuteJob(ctx context.Context, command JobCommand) (JobResult, error) {
 	from, to, err := s.parseRange(command.FromDate, command.ToDate)
 	if err != nil {
@@ -125,10 +107,10 @@ func (s *Service) ExecuteJob(ctx context.Context, command JobCommand) (JobResult
 	}
 	configJSON, err := json.Marshal(jobConfigSnapshot{
 		SourceKind: "WEB_LIST", Items: s.targets, PageSize: s.pageSize,
-		WebBaseURL: s.webBaseURL, ProxyMode: s.proxyMode, ProxyLabel: s.proxyLabel,
+		WebBaseURL: s.webBaseURL,
 	})
 	if err != nil {
-		return JobResult{}, fmt.Errorf("Job 설정 snapshot 생성 실패: %w", err)
+		return JobResult{}, fmt.Errorf("job 설정 snapshot 생성 실패: %w", err)
 	}
 	record, err := s.store.StartWebListJob(ctx, JobStartParams{
 		FromDate: from, ToDate: to, StartedAt: s.now(),

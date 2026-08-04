@@ -2,12 +2,12 @@ version: "2"
 
 sql:
   - engine: "mysql"
-    schema: "secrets/project/mfds/db/schema.sql"
-    queries: "secrets/project/mfds/db/query.sql"
+    schema: "git.secrets/project/mfds/db/schema.sql"
+    queries: "git.secrets/project/mfds/db/query.sql"
     gen:
       go:
         package: "sqlcgen"
-        out: "secrets/project/mfds/sqlcgen"
+        out: "git.secrets/project/mfds/sqlcgen"
         sql_package: "database/sql"
         emit_db_tags: true
         emit_json_tags: true

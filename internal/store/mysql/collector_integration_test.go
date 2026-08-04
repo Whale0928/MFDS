@@ -24,11 +24,11 @@ var integrationTargets = []weblist.Target{
 	{Name: "리큐르", Code: "C0314240000000000000"},
 }
 
-func integrationStoreV2(t *testing.T) *Store {
+func integrationStore(t *testing.T) *Store {
 	t.Helper()
-	dsn := os.Getenv("MFDS_INTEGRATION_DSN")
+	dsn := os.Getenv("MYSQL_DSN")
 	if dsn == "" {
-		t.Skip("MFDS_INTEGRATION_DSN이 설정되지 않았습니다")
+		t.Skip("MYSQL_DSN이 설정되지 않았습니다")
 	}
 	store, err := Open(config.DatabaseConfig{
 		DSN: dsn, MaxOpenConns: 8, MaxIdleConns: 4,
@@ -48,7 +48,7 @@ func integrationStoreV2(t *testing.T) *Store {
 	return store
 }
 
-func integrationServiceV2(t *testing.T, store *Store, serverURL string) *weblist.Service {
+func integrationService(t *testing.T, store *Store, serverURL string) *weblist.Service {
 	t.Helper()
 	baseURL, err := url.Parse(serverURL)
 	if err != nil {
@@ -82,7 +82,7 @@ func cleanupIntegrationJob(t *testing.T, store *Store, jobID uint64) {
 	})
 }
 
-func TestWebListProcessingIntegration_날짜Task_4개품목과추가페이지를저장한다(t *testing.T) {
+func TestExecuteJob_날짜Task_4개품목과추가페이지를저장한다(t *testing.T) {
 	page1 := readFixture(t, "../../source/mfdsweb/testdata/list_page1.html")
 	page2 := readFixture(t, "../../source/mfdsweb/testdata/list_page2.html")
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -95,8 +95,8 @@ func TestWebListProcessingIntegration_날짜Task_4개품목과추가페이지를
 	}))
 	defer server.Close()
 
-	store := integrationStoreV2(t)
-	service := integrationServiceV2(t, store, server.URL)
+	store := integrationStore(t)
+	service := integrationService(t, store, server.URL)
 	result, err := service.ExecuteJob(context.Background(), weblist.JobCommand{
 		FromDate: "2026-07-27", ToDate: "2026-07-27", Workers: 2,
 	})
@@ -142,7 +142,7 @@ func TestWebListProcessingIntegration_날짜Task_4개품목과추가페이지를
 	}
 }
 
-func TestWebListProcessingIntegration_페이지경계RCNO중복_날짜전체를재검증한다(t *testing.T) {
+func TestExecuteJob_페이지경계RCNO중복_날짜전체를재검증한다(t *testing.T) {
 	page1 := readFixture(t, "../../source/mfdsweb/testdata/list_page1.html")
 	page2 := readFixture(t, "../../source/mfdsweb/testdata/list_page2.html")
 	var corrupted atomic.Bool
@@ -164,8 +164,8 @@ func TestWebListProcessingIntegration_페이지경계RCNO중복_날짜전체를�
 	}))
 	defer server.Close()
 
-	store := integrationStoreV2(t)
-	service := integrationServiceV2(t, store, server.URL)
+	store := integrationStore(t)
+	service := integrationService(t, store, server.URL)
 	result, err := service.ExecuteJob(context.Background(), weblist.JobCommand{
 		FromDate: "2026-07-23", ToDate: "2026-07-23", Workers: 2,
 	})
@@ -219,7 +219,7 @@ func TestWebListProcessingIntegration_페이지경계RCNO중복_날짜전체를�
 	}
 }
 
-func TestWebListProcessingIntegration_부분실패후Task전체재시도_중복키를위반하지않는다(t *testing.T) {
+func TestExecuteJob_부분실패후Task전체재시도_중복키를위반하지않는다(t *testing.T) {
 	page1 := readFixture(t, "../../source/mfdsweb/testdata/list_page1.html")
 	page2 := readFixture(t, "../../source/mfdsweb/testdata/list_page2.html")
 	var failed atomic.Bool
@@ -238,8 +238,8 @@ func TestWebListProcessingIntegration_부분실패후Task전체재시도_중복�
 	}))
 	defer server.Close()
 
-	store := integrationStoreV2(t)
-	service := integrationServiceV2(t, store, server.URL)
+	store := integrationStore(t)
+	service := integrationService(t, store, server.URL)
 	result, err := service.ExecuteJob(context.Background(), weblist.JobCommand{
 		FromDate: "2026-07-26", ToDate: "2026-07-26", Workers: 2,
 	})
@@ -270,7 +270,7 @@ func TestWebListProcessingIntegration_부분실패후Task전체재시도_중복�
 	}
 }
 
-func TestWebListProcessingIntegration_빈결과날짜_4개Fetch로완료한다(t *testing.T) {
+func TestExecuteJob_빈결과날짜_4개Fetch로완료한다(t *testing.T) {
 	empty := readFixture(t, "../../source/mfdsweb/testdata/list_empty.html")
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html; charset=UTF-8")
@@ -278,8 +278,8 @@ func TestWebListProcessingIntegration_빈결과날짜_4개Fetch로완료한다(t
 	}))
 	defer server.Close()
 
-	store := integrationStoreV2(t)
-	service := integrationServiceV2(t, store, server.URL)
+	store := integrationStore(t)
+	service := integrationService(t, store, server.URL)
 	result, err := service.ExecuteJob(context.Background(), weblist.JobCommand{
 		FromDate: "2026-07-25", ToDate: "2026-07-25", Workers: 2,
 	})
@@ -321,7 +321,7 @@ func adaptFixture(fixture []byte, request *http.Request) []byte {
 }
 
 func TestClaimTask_동시실행_같은Task를한번만할당한다(t *testing.T) {
-	store := integrationStoreV2(t)
+	store := integrationStore(t)
 	record, err := store.StartWebListJob(context.Background(), weblist.JobStartParams{
 		FromDate:  time.Date(2026, 7, 24, 0, 0, 0, 0, time.Local),
 		ToDate:    time.Date(2026, 7, 24, 0, 0, 0, 0, time.Local),

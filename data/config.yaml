@@ -1,0 +1,30 @@
+# 고정된 비밀이 아닌 실행 설정만 관리합니다.
+# MYSQL_DSN만 환경 변수로 주입합니다.
+
+timezone: Asia/Seoul
+
+web:
+  base_url: https://impfood.mfds.go.kr
+  list_page_size: 50
+  list_workers: 2
+  qps: 1
+
+database:
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 30m
+  conn_max_idle_time: 5m
+
+retry:
+  max_attempts: 3
+  delays: [2s, 5s, 15s]
+
+targets:
+  - name: 위스키
+    code: C0314210000000000000
+  - name: 브랜디
+    code: C0314220000000000000
+  - name: 일반증류주
+    code: C0314230000000000000
+  - name: 리큐르
+    code: C0314240000000000000

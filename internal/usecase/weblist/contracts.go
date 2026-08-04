@@ -12,14 +12,10 @@ import (
 
 const (
 	MaximumPageSize          = 50
-	RunStatusListing         = "RUNNING"
-	RunStatusCreated         = "CREATED"
 	RunStatusCompleted       = "COMPLETED"
 	RunStatusPartialFailed   = "PARTIAL_FAILED"
 	RunStatusCancelled       = "CANCELLED"
 	PartitionStatusDone      = "DONE"
-	PartitionStatusPending   = "PENDING"
-	PartitionStatusDirty     = "FAILED"
 	PartitionStatusFailed    = "FAILED"
 	defaultExecutionLease    = 5 * time.Minute
 	leaseRenewInterval       = time.Minute
@@ -36,25 +32,18 @@ type Target struct {
 }
 
 type Options struct {
-	Targets               []Target
-	PageSize              int
-	QPS                   float64
-	MaxAttempts           int
-	RetryDelays           []time.Duration
-	Location              *time.Location
-	WebBaseURL            string
-	ProxyMode, ProxyLabel string
-	Now                   func() time.Time
-	ProcessID             string
-}
-
-type Command struct {
-	ItemName, ProcessDate string
+	Targets     []Target
+	PageSize    int
+	QPS         float64
+	MaxAttempts int
+	RetryDelays []time.Duration
+	Location    *time.Location
+	WebBaseURL  string
+	Now         func() time.Time
+	ProcessID   string
 }
 
 type JobCommand struct {
-	// ItemNames는 이전 호출부 호환용이며 고정 4개 품목 실행에서는 사용하지 않습니다.
-	ItemNames        []string
 	FromDate, ToDate string
 	Workers          int
 	OnStarted        func(uint64)
@@ -177,11 +166,10 @@ type FailTaskParams struct {
 
 type Result struct {
 	RunID, PartitionID            uint64
-	ItemName, ItemCode            string
 	ProcessDate                   time.Time
 	RunStatus, PartitionStatus    string
-	ExpectedTotal, ParsedRows     uint64
-	ExpectedPages, FetchedPages   uint32
+	ParsedRows                    uint64
+	FetchedPages                  uint32
 	UniqueRCNOCount, NewRCNOCount uint64
 }
 

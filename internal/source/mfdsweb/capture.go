@@ -35,10 +35,10 @@ func captureBody(reader io.Reader, maximum int64) ([]byte, []byte, [32]byte, err
 	if err != nil {
 		return nil, nil, [32]byte{}, fmt.Errorf("gzip writer 생성 실패: %w", err)
 	}
-	writer.Header.ModTime = time.Unix(0, 0)
-	writer.Header.Name = ""
-	writer.Header.Comment = ""
-	writer.Header.OS = 255
+	writer.ModTime = time.Unix(0, 0)
+	writer.Name = ""
+	writer.Comment = ""
+	writer.OS = 255
 	if _, err := writer.Write(body); err != nil {
 		return nil, nil, [32]byte{}, fmt.Errorf("gzip 압축 실패: %w", err)
 	}

@@ -1,3 +1,6 @@
-[submodule "secrets"]
-	path = secrets
+[submodule "git.secrets"]
+	path = git.secrets
 	url = ../secrets.git
+[submodule "git.environment-variables"]
+	path = git.environment-variables
+	url = https://github.com/bottle-note/environment-variables.git

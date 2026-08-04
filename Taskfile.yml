@@ -10,11 +10,23 @@ tasks:
     desc: 비공개 실행 자산 submodule을 준비합니다
     cmds:
       - git submodule update --init --recursive
+      - task: env:local
     status:
-      - test -f secrets/project/mfds/.env
-      - test -f secrets/project/mfds/config.yaml
-      - test -f secrets/project/mfds/db/schema.sql
-      - test -f secrets/project/mfds/db/query.sql
+      - test -f .env.local
+      - test -f git.environment-variables/application.go/local.sops.env
+      - test -f data/config.yaml
+      - test -f git.secrets/project/mfds/db/schema.sql
+      - test -f git.secrets/project/mfds/db/query.sql
+
+  env:local:
+    desc: SOPS 환경 변수를 로컬 실행 파일로 복호화합니다
+    preconditions:
+      - sh: command -v sops
+        msg: sops 설치가 필요합니다
+      - sh: test -f git.environment-variables/application.go/local.sops.env
+        msg: git.environment-variables submodule 초기화가 필요합니다
+    cmds:
+      - SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}" sops decrypt --output .env.local git.environment-variables/application.go/local.sops.env
 
   build:
     desc: CLI 바이너리를 빌드합니다
@@ -55,27 +67,27 @@ tasks:
   compose:config:
     desc: Docker Compose 설정을 검증합니다
     cmds:
-      - docker compose --env-file secrets/project/mfds/.env config --quiet
+      - docker compose --env-file .env.local config --quiet
 
   compose:up:
     desc: MySQL을 시작하고 healthy 상태까지 기다립니다
     cmds:
-      - docker compose --env-file secrets/project/mfds/.env up -d --wait --wait-timeout 120
+      - docker compose --env-file .env.local up -d --wait --wait-timeout 120
 
   compose:down:
     desc: MySQL 컨테이너를 중지합니다
     cmds:
-      - docker compose --env-file secrets/project/mfds/.env down
+      - docker compose --env-file .env.local down
 
   health:
     desc: CLI 설정과 MySQL 연결을 확인합니다
     cmds:
-      - go run ./cmd/mfds-crawler health
+      - go run . health
 
   migrate:
     desc: MySQL migration을 적용합니다
     cmds:
-      - go run ./cmd/mfds-crawler migrate
+      - go run . migrate
 
   sqlc:
     desc: db 스키마와 쿼리에서 Go 코드를 생성합니다
@@ -88,9 +100,9 @@ tasks:
       - |
         snapshot_dir="$(mktemp -d)"
         trap 'rm -rf "$snapshot_dir"' EXIT
-        cp -R secrets/project/mfds/sqlcgen "$snapshot_dir/sqlcgen"
+        cp -R git.secrets/project/mfds/sqlcgen "$snapshot_dir/sqlcgen"
         sqlc generate
-        diff -ru "$snapshot_dir/sqlcgen" secrets/project/mfds/sqlcgen
+        diff -ru "$snapshot_dir/sqlcgen" git.secrets/project/mfds/sqlcgen
 
   db:reset:
     desc: 로컬 mfds_ledger 데이터베이스를 재생성하고 migration을 적용합니다

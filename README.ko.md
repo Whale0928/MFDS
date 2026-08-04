@@ -19,7 +19,8 @@
 - Go 1.26 이상
 - Task 3.17 이상
 - Docker 28 이상과 Compose v2
-- 비공개 실행 자산 서브모듈 접근 권한
+- SOPS 3.11 이상과 등록된 age 키
+- 비공개 서브모듈 2개에 대한 접근 권한
 
 ## 실행
 
@@ -42,7 +43,9 @@ task run -- collect \
 설정 우선순위:
 
 ```text
-CLI flag > OS 환경 변수 > 비공개 .env > 비공개 YAML > 기본값
+DB 접속값: OS 환경 변수 > 복호화된 `.env.local`
+
+고정 실행값: `data/config.yaml`
 ```
 
 ## 검증
@@ -55,6 +58,8 @@ task build
 task sqlc:check
 ```
 
-실행 설정, migration, 생성된 DB 코드, 스냅샷과 운영 보고서는 비공개
-서브모듈에서 관리합니다. 이 저장소에는 실제 자격증명이나 수집 원장을
-커밋하지 않습니다.
+DB 접속 환경 변수는 `git.environment-variables/application.go/local.sops.env`에서
+암호화해 관리하며 `task setup`이 추적되지 않는 `.env.local`로 복호화합니다.
+migration, 생성된 DB 코드, 스냅샷과 운영 보고서는 `git.secrets` 서브모듈에서
+관리합니다.
+비밀이 아닌 고정 실행 설정은 `data/config.yaml`에서 관리하며 CLI flag나 환경 변수로 덮어쓰지 않습니다.

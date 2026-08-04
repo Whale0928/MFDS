@@ -20,7 +20,8 @@ reconciliation.
 - Go 1.26+
 - Task 3.17+
 - Docker 28+ with Compose v2
-- Access to the private runtime-assets submodule
+- SOPS 3.11+ and an authorized age key
+- Access to both private submodules
 
 ## Run
 
@@ -43,7 +44,9 @@ task run -- collect \
 Configuration precedence:
 
 ```text
-CLI flags > OS environment > private .env > private YAML > defaults
+Database connection values: OS environment > decrypted `.env.local`
+
+Fixed runtime values: `data/config.yaml`
 ```
 
 ## Verify
@@ -56,6 +59,8 @@ task build
 task sqlc:check
 ```
 
-Runtime configuration, migrations, generated database code, snapshots, and
-operational reports are kept in the private submodule. This repository must not
-contain live credentials or collected ledger data.
+Database connection environment variables are encrypted at
+`git.environment-variables/application.go/local.sops.env`. `task setup` decrypts
+them into the ignored `.env.local` file. Migrations, generated database code,
+snapshots, and operational reports remain in the `git.secrets` submodule.
+Non-secret runtime constants are tracked in `data/config.yaml` and are not overridden by CLI flags or environment variables.

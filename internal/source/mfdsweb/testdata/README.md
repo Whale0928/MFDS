@@ -14,7 +14,7 @@
 | `audit-retention-empty.html.gz.b64` | item=브랜디, date=2025-07-28, page=1, limit=1 | 614644 | `9824cf4a47b27c2176894b90f1299a6a5dbc36f53e6de6e88738f02d0d183e27` |
 | `audit-invalid-date-error.html.gz.b64` | invalid-date probe, redirected generic error response | 5153 | `26aed11b0cf519f613952316b648cae15cd38d460c7dff539f87d43479a2397c` |
 
-원본 요청의 cookie, session header, API key, DSN, proxy 인증정보는 저장하지 않았다.
+원본 요청의 cookie, session header, DSN 등 민감정보는 저장하지 않았다.
 
 ## Compact contract fixtures
 

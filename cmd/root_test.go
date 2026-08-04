@@ -1,4 +1,4 @@
-package cli
+package cmd
 
 import (
 	"bytes"
@@ -54,6 +54,11 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 			t.Fatalf("removed command %q remains in output = %q", removed, output.String())
 		}
 	}
+	for _, removedFlag := range []string{"--config", "--env-file", "--mysql-dsn", "--proxy-mode", "--web-qps"} {
+		if strings.Contains(output.String(), removedFlag) {
+			t.Fatalf("removed flag %q remains in output = %q", removedFlag, output.String())
+		}
+	}
 }
 
 func TestRootCommand_Health_설정과DB연결결과를출력한다(t *testing.T) {
@@ -107,7 +112,7 @@ func newTestRootWithRunner(
 	runWebListJob RunWebListJobFunc,
 ) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
-	configFile, envFile := writeCLIConfig(t)
+	configFile, _ := writeCLIConfig(t)
 	output := &bytes.Buffer{}
 	root, err := NewRootCommand(Dependencies{
 		Loader: config.NewLoader(),
@@ -121,12 +126,7 @@ func newTestRootWithRunner(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := root.PersistentFlags().Set("config", configFile); err != nil {
-		t.Fatal(err)
-	}
-	if err := root.PersistentFlags().Set("env-file", envFile); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(filepath.Dir(filepath.Dir(configFile)))
 	return root, output
 }
 
@@ -141,23 +141,34 @@ func successfulWebListJob(
 func writeCLIConfig(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
-	configFile := filepath.Join(dir, "config.yaml")
-	envFile := filepath.Join(dir, ".env")
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configFile := filepath.Join(dataDir, "config.yaml")
+	envFile := filepath.Join(dir, ".env.local")
 	yaml := `
-api:
-  base_url: https://api.example.com
+timezone: Asia/Seoul
 web:
   base_url: https://web.example.com
+  list_page_size: 50
+  list_workers: 2
+  qps: 1
 database:
+  max_open_conns: 10
+  max_idle_conns: 5
   conn_max_lifetime: 30m
   conn_max_idle_time: 5m
+retry:
+  max_attempts: 3
+  delays: [2s, 5s, 15s]
 targets:
   - {name: 위스키, code: C0314210000000000000}
   - {name: 브랜디, code: C0314220000000000000}
   - {name: 일반증류주, code: C0314230000000000000}
   - {name: 리큐르, code: C0314240000000000000}
 `
-	env := "MFDS_API_KEY=test-key\nMYSQL_DSN=test:test@tcp(localhost:3306)/test\n"
+	env := "MYSQL_DSN=test:test@tcp(localhost:3306)/test\n"
 	if err := os.WriteFile(configFile, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}

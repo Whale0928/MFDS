@@ -17,13 +17,12 @@ var fixedTargets = []Target{
 }
 
 type fakeJobStore struct {
-	mu          sync.Mutex
-	task        DateTask
-	status      string
-	claimed     bool
-	commits     []CommitFetchParams
-	failures    int
-	maxAttempts int
+	mu       sync.Mutex
+	task     DateTask
+	status   string
+	claimed  bool
+	commits  []CommitFetchParams
+	failures int
 }
 
 func (s *fakeJobStore) StartWebListJob(_ context.Context, params JobStartParams) (JobStartRecord, error) {

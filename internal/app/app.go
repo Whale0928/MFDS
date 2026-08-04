@@ -2,12 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"time"
 
-	"github.com/bottle-note/mfds-crawler/internal/cli"
+	"github.com/bottle-note/mfds-crawler/cmd"
 	"github.com/bottle-note/mfds-crawler/internal/config"
 	"github.com/bottle-note/mfds-crawler/internal/source/mfdsweb"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
@@ -15,16 +16,16 @@ import (
 )
 
 func Run(ctx context.Context, out, errOut io.Writer) error {
-	root, err := cli.NewRootCommand(cli.Dependencies{
+	root, err := cmd.NewRootCommand(cmd.Dependencies{
 		Loader: config.NewLoader(),
-		OpenDatabase: func(cfg config.DatabaseConfig) (cli.Database, error) {
+		OpenDatabase: func(cfg config.DatabaseConfig) (cmd.Database, error) {
 			return storemysql.Open(cfg)
 		},
 		RunWebListJob: func(
 			ctx context.Context,
 			cfg config.Config,
 			command weblist.JobCommand,
-		) (weblist.JobResult, error) {
+		) (jobResult weblist.JobResult, runErr error) {
 			location, err := time.LoadLocation(cfg.Timezone)
 			if err != nil {
 				return weblist.JobResult{}, fmt.Errorf("timezone 읽기 실패: %w", err)
@@ -37,7 +38,9 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			if err != nil {
 				return weblist.JobResult{}, err
 			}
-			defer store.Close()
+			defer func() {
+				runErr = errors.Join(runErr, store.Close())
+			}()
 			baseURL, err := url.Parse(cfg.Web.BaseURL)
 			if err != nil {
 				return weblist.JobResult{}, fmt.Errorf("웹 base URL 읽기 실패: %w", err)
@@ -49,7 +52,7 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			service, err := weblist.NewService(store, mfdsweb.NewUsecaseAdapter(webClient), weblist.Options{
 				Targets: targets, PageSize: cfg.Web.ListPageSize, QPS: cfg.Web.QPS,
 				MaxAttempts: cfg.Retry.MaxAttempts, RetryDelays: cfg.Retry.Delays, Location: location,
-				WebBaseURL: cfg.Web.BaseURL, ProxyMode: cfg.Proxy.Mode, ProxyLabel: cfg.Proxy.Label,
+				WebBaseURL: cfg.Web.BaseURL,
 			})
 			if err != nil {
 				return weblist.JobResult{}, err

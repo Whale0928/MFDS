@@ -18,6 +18,18 @@ func TestRequireOne_영향행이1개_오류가없다(t *testing.T) {
 	}
 }
 
+func TestRequireOne_영향행이0개_오류를반환한다(t *testing.T) {
+	if err := requireOne(rowsAffectedResult(0), "test"); err == nil {
+		t.Fatal("requireOne() error = nil, want error")
+	}
+}
+
+func TestRequireLease_영향행이1개_오류가없다(t *testing.T) {
+	if err := requireLease(rowsAffectedResult(1), "test"); err != nil {
+		t.Fatalf("requireLease() error = %v", err)
+	}
+}
+
 func TestRequireLease_영향행이0개_LeaseLost오류를반환한다(t *testing.T) {
 	if err := requireLease(rowsAffectedResult(0), "test"); err == nil {
 		t.Fatal("requireLease() error = nil, want error")

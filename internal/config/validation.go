@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"slices"
 	"strings"
 )
 
@@ -17,18 +16,11 @@ var requiredTargets = map[string]string{
 
 func (c Config) Validate() error {
 	var problems []error
-	if strings.TrimSpace(c.API.Key) == "" {
-		problems = append(problems, errors.New("MFDS_API_KEY가 비어 있습니다"))
-	}
-	problems = appendURLProblem(problems, "api.base_url", c.API.BaseURL)
 	problems = appendURLProblem(problems, "web.base_url", c.Web.BaseURL)
 	if strings.TrimSpace(c.Database.DSN) == "" {
 		problems = append(problems, errors.New("MYSQL_DSN이 비어 있습니다"))
 	}
-	if c.API.PageSize <= 0 || c.API.PartitionWorkers <= 0 || c.API.PageWorkers <= 0 || c.API.QPS <= 0 || c.API.Burst <= 0 {
-		problems = append(problems, errors.New("API page size, worker, QPS, burst는 0보다 커야 합니다"))
-	}
-	if c.Web.ListPageSize <= 0 || c.Web.ListWorkers <= 0 || c.Web.DetailWorkers <= 0 || c.Web.QPS <= 0 {
+	if c.Web.ListPageSize <= 0 || c.Web.ListWorkers <= 0 || c.Web.QPS <= 0 {
 		problems = append(problems, errors.New("웹 page size, worker, QPS는 0보다 커야 합니다"))
 	}
 	if c.Web.ListPageSize > 50 {
@@ -36,12 +28,6 @@ func (c Config) Validate() error {
 	}
 	if c.Database.MaxOpenConns <= 0 || c.Database.MaxIdleConns < 0 || c.Database.MaxIdleConns > c.Database.MaxOpenConns {
 		problems = append(problems, errors.New("DB connection pool 설정이 유효하지 않습니다"))
-	}
-	if !slices.Contains([]string{"off", "fallback", "always"}, c.Proxy.Mode) {
-		problems = append(problems, fmt.Errorf("proxy.mode %q은 지원하지 않습니다", c.Proxy.Mode))
-	}
-	if (c.Proxy.Mode == "fallback" || c.Proxy.Mode == "always") && strings.TrimSpace(c.Proxy.URL) == "" {
-		problems = append(problems, errors.New("proxy 모드가 활성화되면 MFDS_WEB_PROXY_URL이 필요합니다"))
 	}
 	if err := validateTargets(c.Targets); err != nil {
 		problems = append(problems, err)

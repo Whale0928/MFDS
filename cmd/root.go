@@ -1,4 +1,4 @@
-package cli
+package cmd
 
 import (
 	"context"
@@ -34,8 +34,6 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 		return nil, fmt.Errorf("CLI 의존성이 모두 필요합니다")
 	}
 
-	var configFile string
-	var envFile string
 	var cfg config.Config
 
 	root := &cobra.Command{
@@ -44,7 +42,7 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			loaded, err := deps.Loader.Load(configFile, envFile)
+			loaded, err := deps.Loader.Load(config.DefaultConfigFile, config.DefaultEnvFile)
 			if err != nil {
 				return err
 			}
@@ -58,33 +56,6 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 	root.SetOut(deps.Out)
 	root.SetErr(deps.ErrOut)
 	root.CompletionOptions.DisableDefaultCmd = true
-
-	flags := root.PersistentFlags()
-	flags.StringVar(
-		&configFile,
-		"config",
-		"secrets/project/mfds/config.yaml",
-		"YAML 설정 파일",
-	)
-	flags.StringVar(
-		&envFile,
-		"env-file",
-		"secrets/project/mfds/.env",
-		"환경 변수 파일",
-	)
-	flags.String("mysql-dsn", "", "MySQL DSN 재정의")
-	flags.Float64("web-qps", 0, "웹 QPS 재정의")
-	flags.String("proxy-mode", "", "웹 프록시 모드 재정의")
-
-	for key, name := range map[string]string{
-		"database.dsn": "mysql-dsn",
-		"web.qps":      "web-qps",
-		"proxy.mode":   "proxy-mode",
-	} {
-		if err := deps.Loader.BindFlag(key, flags.Lookup(name)); err != nil {
-			return nil, fmt.Errorf("%s flag 연결 실패: %w", name, err)
-		}
-	}
 
 	getConfig := func() config.Config { return cfg }
 	root.AddCommand(

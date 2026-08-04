@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
@@ -80,7 +81,10 @@ func NewClient(options ClientOptions) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) FetchList(ctx context.Context, listRequest ListRequest) (FetchArtifact, error) {
+func (c *Client) FetchList(
+	ctx context.Context,
+	listRequest ListRequest,
+) (artifact FetchArtifact, resultErr error) {
 	if err := validateListRequest(listRequest); err != nil {
 		return FetchArtifact{}, err
 	}
@@ -112,7 +116,7 @@ func (c *Client) FetchList(ctx context.Context, listRequest ListRequest) (FetchA
 
 	requestKey := sha256.Sum256([]byte(ListPath + "?" + values.Encode()))
 	startedAt := c.now()
-	artifact := FetchArtifact{
+	artifact = FetchArtifact{
 		Method:             http.MethodGet,
 		URL:                target.String(),
 		QueryJSON:          queryJSON,
@@ -127,7 +131,9 @@ func (c *Client) FetchList(ctx context.Context, listRequest ListRequest) (FetchA
 		artifact.Duration = artifact.FinishedAt.Sub(startedAt)
 		return artifact, &AdapterError{Kind: ErrorKindNetwork, Op: "HTTP 요청", Err: err}
 	}
-	defer response.Body.Close()
+	defer func() {
+		resultErr = errors.Join(resultErr, response.Body.Close())
+	}()
 
 	artifact.HTTPStatus = response.StatusCode
 	artifact.ContentType = response.Header.Get("Content-Type")
