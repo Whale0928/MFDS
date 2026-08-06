@@ -136,6 +136,13 @@ func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
 		if !strings.Contains(query, "FROM declaration_details WHERE rcno") {
 			return nil, fmt.Errorf("unexpected query")
 		}
+		if strings.Contains(query, "alcohol_category_ko") {
+			row := make([]any, len(detailColumns))
+			for index := range row {
+				row[index] = "값"
+			}
+			return &fakeRows{values: [][]any{row}}, nil
+		}
 		return &fakeRows{values: [][]any{{"202600000001", "원본", "source", "정제", "normalized", "REVIEW_REQUIRED", `["AMBIGUOUS"]`, `["700ml? "]`, "2026-08-01", "위스키", "수입사", "영국", "700ml", "700 mL", "40", "40%", "12", "12 years", "", "", "한정", "LOT-1", "B-2", "수입사", "증류소"}}}, nil
 	}}
 	request := httptest.NewRequest(http.MethodGet, "/api/declarations/202600000001", nil)
@@ -155,6 +162,47 @@ func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
 	first, ok := evidence[0].(map[string]any)
 	if !ok || first["label"] != "용량" || first["raw_value"] != "700ml" || first["normalized_value"] != "700 mL" {
 		t.Fatalf("evidence item = %#v", evidence[0])
+	}
+	groups, ok := body["groups"].([]any)
+	if !ok || len(groups) == 0 {
+		t.Fatalf("groups = %#v", body["groups"])
+	}
+}
+
+// 상세 화면은 원장과 정제 값을 모두 노출하되 원본 HTML, 해시, 수집 metadata는 노출하지 않는다.
+func TestDetailColumns_원장과정제를모두노출하고수집metadata는제외한다(t *testing.T) {
+	titles := map[string]bool{}
+	for _, column := range detailColumns {
+		titles[column.Group] = true
+	}
+	for _, expected := range []string{"원장 - 수집한 그대로", "제품명 정제 결과", "용량과 도수", "관리 번호", "정제 이력"} {
+		if !titles[expected] {
+			t.Fatalf("그룹 %q 가 없다", expected)
+		}
+	}
+	joined := strings.Join(func() []string {
+		expressions := make([]string, len(detailColumns))
+		for index, column := range detailColumns {
+			expressions[index] = column.Expr
+		}
+		return expressions
+	}(), " ")
+	for _, forbidden := range []string{"raw_row_html", "raw_row_sha256", "semantic_sha256", "source_job_id", "source_task_id", "source_fetch_id", "source_detail_href", "claim_"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("비공개 컬럼 %q 를 노출한다", forbidden)
+		}
+	}
+}
+
+// 모든 필드에 각주가 붙어 있어야 화면에서 용어를 설명할 수 있다.
+func TestDetailColumns_모든필드가라벨과각주를가진다(t *testing.T) {
+	for _, column := range detailColumns {
+		if column.Label == "" || column.Hint == "" || column.Group == "" {
+			t.Fatalf("라벨 또는 각주가 비었다: %#v", column)
+		}
+		if strings.Contains(column.Label, "SKU") || strings.Contains(column.Label, "_") {
+			t.Fatalf("라벨에 내부 용어가 남았다: %q", column.Label)
+		}
 	}
 }
 

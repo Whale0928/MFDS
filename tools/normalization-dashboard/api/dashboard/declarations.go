@@ -120,7 +120,49 @@ func (s *Server) declaration(w http.ResponseWriter, r *http.Request) {
 	detail.ReasonCodes = jsonList(reasons)
 	detail.Evidence = normalizationEvidence(detail.ReasonCodes, jsonList(fragments), []evidenceItem{{Label: "용량", RawValue: volumeRaw, NormalizedValue: volume}, {Label: "도수", RawValue: abvRaw, NormalizedValue: abv}, {Label: "숙성", RawValue: ageRaw, NormalizedValue: age}, {Label: "빈티지", RawValue: vintageRaw, NormalizedValue: vintage}})
 	detail.Fields = map[string]string{"volume": volume, "abv": abv, "age": age, "vintage": vintage, "edition": edition, "lot": lot, "batch": batch, "importer_base_name": importer, "overseas_establishment": establishment}
+	groups, err := s.detailGroups(r, rcno)
+	if err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	detail.Groups = groups
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// detailGroups는 detailColumns 정의대로 원장과 정제 값을 그룹별로 읽는다.
+func (s *Server) detailGroups(r *http.Request, rcno string) ([]detailGroup, error) {
+	expressions := make([]string, len(detailColumns))
+	for index, column := range detailColumns {
+		expressions[index] = column.Expr
+	}
+	rows, err := s.queryer.QueryContext(r.Context(), "SELECT "+strings.Join(expressions, ", ")+" FROM declaration_details WHERE rcno = ? LIMIT 1", rcno)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	values := make([]string, len(detailColumns))
+	targets := make([]any, len(detailColumns))
+	for index := range values {
+		targets[index] = &values[index]
+	}
+	if err := rows.Scan(targets...); err != nil {
+		return nil, err
+	}
+	groups := make([]detailGroup, 0, 8)
+	index := map[string]int{}
+	for position, column := range detailColumns {
+		slot, seen := index[column.Group]
+		if !seen {
+			slot = len(groups)
+			index[column.Group] = slot
+			groups = append(groups, detailGroup{Title: column.Group})
+		}
+		groups[slot].Fields = append(groups[slot].Fields, detailField{Label: column.Label, Hint: column.Hint, Value: values[position]})
+	}
+	return groups, rows.Err()
 }
 
 const declarationDetailSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, ''), COALESCE(source_product_name_en, ''), COALESCE(sku_display_name_ko, base_product_name_ko, ''), COALESCE(sku_display_name_en, base_product_name_en, ''), normalization_status, CAST(normalization_reasons AS CHAR), CAST(unparsed_fragments_json AS CHAR), COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), COALESCE(volume_raw, ''), COALESCE(CONCAT(volume_ml, ' mL'), ''), COALESCE(abv_raw, ''), COALESCE(CONCAT(abv_percent, '%'), ''), COALESCE(age_raw, ''), COALESCE(CONCAT(age_years, ' years'), ''), COALESCE(vintage_raw, ''), COALESCE(CAST(vintage_year AS CHAR), ''), COALESCE(edition_name, version_marker, ''), COALESCE(lot_number, ''), COALESCE(batch_number, ''), COALESCE(importer_base_name, ''), COALESCE(overseas_establishment_search_key, '') FROM declaration_details WHERE rcno = ? LIMIT 1`

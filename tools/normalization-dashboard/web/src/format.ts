@@ -43,3 +43,16 @@ const reasonLabels: Record<string, string> = {
 export function reasonLabel(code: string) {
   return reasonLabels[code] ?? code
 }
+
+const fieldLabels: Record<string, string> = {
+  abv: '알코올 도수',
+  age: '숙성 연수',
+  importer: '수입사 이름',
+  normalized_name: '정제된 제품 이름',
+  vintage: '빈티지 연도',
+  volume: '용량',
+}
+
+export function fieldLabel(field: string) {
+  return fieldLabels[field] ?? field
+}

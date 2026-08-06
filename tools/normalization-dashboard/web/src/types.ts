@@ -33,6 +33,18 @@ export interface Declaration {
   reason_codes?: string[]
   evidence?: DetailEvidence[]
   fields?: Record<string, string>
+  groups?: DetailGroup[]
+}
+
+export interface DetailField {
+  label: string
+  hint: string
+  value: string
+}
+
+export interface DetailGroup {
+  title: string
+  fields: DetailField[]
 }
 
 export interface Evidence {

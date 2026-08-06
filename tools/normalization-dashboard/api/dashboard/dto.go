@@ -58,6 +58,17 @@ type declarationDetail struct {
 	ImporterName          string            `json:"importer_name"`
 	Country               string            `json:"country"`
 	Fields                map[string]string `json:"fields"`
+	Groups                []detailGroup     `json:"groups"`
+}
+
+type detailField struct {
+	Label string `json:"label"`
+	Hint  string `json:"hint"`
+	Value string `json:"value"`
+}
+type detailGroup struct {
+	Title  string        `json:"title"`
+	Fields []detailField `json:"fields"`
 }
 
 type countPoint struct {
