@@ -1,4 +1,4 @@
-version: '3'
+version: '3.17'
 
 tasks:
   api:
@@ -17,6 +17,75 @@ tasks:
     dir: web
     cmds:
       - npm run dev -- --host 127.0.0.1
+
+  tunnel:
+    desc: 실행 중인 화면을 Cloudflare quick tunnel로 외부에 공개합니다
+    vars:
+      LABEL: com.bottlenote.mfds.normalization-dashboard-tunnel
+      LOG: /tmp/mfds-normalization-dashboard-cloudflared.log
+    preconditions:
+      - sh: command -v cloudflared
+        msg: cloudflared 설치가 필요합니다 (brew install cloudflared)
+      - sh: curl -sf -o /dev/null http://127.0.0.1:5173/
+        msg: web 태스크를 먼저 실행하세요
+      - sh: curl -sf -o /dev/null http://127.0.0.1:8787/healthz
+        msg: api 태스크를 먼저 실행하세요
+    cmds:
+      # launchctl submit으로 등록하면 터미널을 닫아도 살아있고, 죽여도 launchd가 되살린다.
+      # 그래서 중지는 반드시 tunnel:stop(launchctl remove)으로 해야 한다.
+      - |
+        if launchctl list "{{.LABEL}}" > /dev/null 2>&1; then
+          echo "이미 터널이 열려 있습니다. 주소는 tunnel:url, 닫으려면 tunnel:stop 을 쓰세요." >&2
+          exit 1
+        fi
+        rm -f "{{.LOG}}"
+        # launchd는 기본 PATH만 보므로 실행 파일을 절대 경로로 넘겨야 한다.
+        launchctl submit -l "{{.LABEL}}" -o "{{.LOG}}" -e "{{.LOG}}" -- \
+          "$(command -v cloudflared)" tunnel --url http://127.0.0.1:5173 --no-autoupdate
+        for _ in $(seq 1 40); do
+          url="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "{{.LOG}}" 2>/dev/null | tail -1)"
+          [ -n "$url" ] && break
+          sleep 1
+        done
+        if [ -z "$url" ]; then
+          echo "터널 주소를 얻지 못했습니다. {{.LOG}} 를 확인하세요." >&2
+          exit 1
+        fi
+        printf '외부 공개 주소: %s\n이 주소는 인터넷 전체에 공개됩니다. 시연이 끝나면 tunnel:stop 으로 닫으세요.\n' "$url"
+
+  tunnel:url:
+    desc: 열려 있는 터널의 외부 주소를 다시 출력합니다
+    vars:
+      LABEL: com.bottlenote.mfds.normalization-dashboard-tunnel
+      LOG: /tmp/mfds-normalization-dashboard-cloudflared.log
+    cmds:
+      - |
+        if ! launchctl list "{{.LABEL}}" > /dev/null 2>&1; then
+          echo "열려 있는 터널이 없습니다. tunnel 태스크를 먼저 실행하세요." >&2
+          exit 1
+        fi
+        url="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "{{.LOG}}" 2>/dev/null | tail -1)"
+        if [ -z "$url" ]; then
+          echo "터널은 떠 있지만 주소를 찾지 못했습니다. {{.LOG}} 를 확인하세요." >&2
+          exit 1
+        fi
+        echo "$url"
+
+  tunnel:stop:
+    desc: 외부 공개 터널을 중지합니다
+    vars:
+      LABEL: com.bottlenote.mfds.normalization-dashboard-tunnel
+      LOG: /tmp/mfds-normalization-dashboard-cloudflared.log
+    cmds:
+      # kill만 하면 launchd가 즉시 되살리므로 서비스 등록 자체를 지운다.
+      - |
+        if launchctl list "{{.LABEL}}" > /dev/null 2>&1; then
+          launchctl remove "{{.LABEL}}"
+          echo "터널을 중지했습니다."
+        else
+          echo "실행 중인 터널이 없습니다."
+        fi
+        rm -f "{{.LOG}}"
 
   test:
     desc: API와 web 테스트를 실행합니다
