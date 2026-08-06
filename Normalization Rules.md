@@ -486,7 +486,10 @@ normalization_reasons
 
 `normalization_reasons`에는 적용 규칙과 검토 사유를 코드 형태로 남긴다.
 
+사유 코드는 검토를 유발하는 코드와 정보성 코드로 나뉜다. 정보성 코드만 남은 결과는 `normalized`이며 `review_status`를 `PENDING`으로 올리지 않는다.
+
 ```text
+VOLUME_MISSING
 VOLUME_UNIT_CASE_NORMALIZED
 VOLUME_THOUSANDS_SEPARATOR
 ABV_CONFLICT_BETWEEN_LANGUAGES
@@ -646,7 +649,9 @@ JOIN items i ON i.id = d.source_item_id;
 - `sku_candidate_key_sha256` 후보에는 제품군, `unit_volume_ml`, 숙성·빈티지·도수·PROOF·STRENGTH·버전·에디션·자재·캐스크·배치의 확정값을 사용한다.
 - 용량이 확인되면 `unit_volume_ml`은 SKU 식별 요소에 반드시 포함하고 `package_count`는 제외한다.
 - LOT·제조번호와 RCNO는 `sku_candidate_key_sha256`에 포함하지 않는다.
-- 키 구성 요소가 미상이면 확인된 값과 동일하다고 간주하지 않고 검토 상태를 유지한다.
+- 키 구성 요소가 미상이면 확인된 값과 동일하다고 간주하지 않는다. 이때는 `sku_candidate_key_sha256`을 생성하지 않아 확정된 SKU와 자동으로 묶이지 않게 한다.
+- 키 구성 요소 미상 자체는 `REVIEW_REQUIRED` 사유가 아니다. 원장 다수가 용량 미표기이며, 이를 검토로 올리면 실제 충돌 사례가 묻힌다. 미상 사실은 정보성 사유 코드로만 남긴다.
+- `REVIEW_REQUIRED`는 값 사이의 충돌 또는 문맥 모호성이 있을 때만 사용한다. 값의 부재는 충돌이 아니다.
 - 같은 `sku_candidate_key_sha256`은 동일 제품 확정이 아니라 검토 후보를 의미한다.
 
 #### 정제 상태 컬럼
