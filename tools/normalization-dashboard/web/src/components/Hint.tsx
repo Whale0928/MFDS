@@ -5,7 +5,6 @@ export function Hint({ text, children }: { text: string; children: React.ReactNo
   if (!text) return <>{children}</>
   return <span className="hint" tabIndex={0} role="note" aria-label={text}>
     {children}
-    <span className="hint__mark" aria-hidden="true">?</span>
     <span className="hint__bubble">{text}</span>
   </span>
 }

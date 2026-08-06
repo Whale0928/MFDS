@@ -27,11 +27,14 @@ nav { display: flex; height: 72px; align-items: stretch; gap: 3px; } nav button 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }
 
 /* 용어 각주: 마우스를 올리거나 키보드 초점이 오면 설명이 뜬다 */
-.hint { position: relative; display: inline-flex; align-items: baseline; gap: 3px; cursor: help; outline: 0; }
-.hint__mark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border: 1px solid #b08a63; border-radius: 50%; color: #8f4924; font: 600 9px/1 "DM Mono", monospace; transform: translateY(-1px); flex: none; }
-.hint__bubble { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; width: max-content; max-width: 290px; padding: 10px 12px; background: #152638; color: #fff8ed; border-left: 3px solid #c47a43; font: 400 12px/1.6 system-ui, sans-serif; letter-spacing: 0; text-align: left; white-space: normal; word-break: keep-all; box-shadow: 0 12px 30px rgba(6, 14, 24, .3); opacity: 0; visibility: hidden; transition: opacity .12s ease; pointer-events: none; }
-.hint:hover .hint__bubble, .hint:focus .hint__bubble, .hint:focus-visible .hint__bubble { opacity: 1; visibility: visible; }
-.hint:focus-visible .hint__mark { outline: 2px solid #8f4924; outline-offset: 2px; }
+/* 각주가 붙은 용어는 점선 밑줄로 표시한다. 작은 원형 아이콘은 확대하면 뭉개져서 쓰지 않는다. */
+.hint { position: relative; display: inline-block; width: fit-content; justify-self: start; border-bottom: 1px dotted #a9805a; cursor: help; outline: 0; }
+.hint:hover, .hint:focus-visible { border-bottom-color: #8f4924; }
+.declaration-table__header .hint, .sku-table__head .hint { border-bottom-color: rgba(255, 248, 237, .45); }
+.declaration-table__header .hint:hover, .sku-table__head .hint:hover { border-bottom-color: #fff8ed; }
+.hint:focus-visible { outline: 2px solid #8f4924; outline-offset: 2px; }
+.hint__bubble { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; width: max-content; max-width: 290px; padding: 10px 12px; background: #152638; color: #fff8ed; border-left: 3px solid #c47a43; font: 400 12px/1.6 system-ui, sans-serif; letter-spacing: 0; text-align: left; white-space: normal; word-break: keep-all; box-shadow: 0 12px 30px rgba(6, 14, 24, .3); opacity: 0; visibility: hidden; pointer-events: none; }
+.hint:hover .hint__bubble, .hint:focus .hint__bubble, .hint:focus-visible .hint__bubble { opacity: 1; visibility: visible; transition: opacity .1s ease; }
 .declaration-table__header .hint__bubble, .sku-table__head .hint__bubble { bottom: auto; top: calc(100% + 8px); }
 
 /* 상세 패널: 원장과 정제를 좌우로 나눠 각각 따로 스크롤한다 */
