@@ -55,9 +55,8 @@ func parseAge(ko, en string, state *derivationState) {
 	state.add(ReasonAgeExtracted)
 }
 func parseVintage(ko, en string, state *derivationState) {
-	value := volumePattern.ReplaceAllString(ko+" "+en, "$1")
-	value = manufacturePattern.ReplaceAllString(value, "")
-	value = lotPattern.ReplaceAllString(value, "")
+	// Section 5.4 requires LOT, manufacture number and unlabeled code sections to be separated before a vintage is searched.
+	value := buildName(ko, baseNameMode) + " " + buildName(en, baseNameMode)
 	for _, match := range vintagePattern.FindAllStringSubmatch(value, -1) {
 		if len(match) != 2 {
 			continue

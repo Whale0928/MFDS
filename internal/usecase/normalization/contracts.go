@@ -35,6 +35,8 @@ type Source struct {
 	ItemName                  string
 	ImporterName              string
 	OverseasEstablishmentName string
+	ManufactureCountryName    string
+	ExportCountryName         string
 	ExpiryText                string
 	ProcessedDate             time.Time
 	ClaimOwner                string
@@ -77,6 +79,24 @@ type Fields struct {
 	ImporterSearchKey              string
 	LegalEntityType                string
 	OverseasEstablishmentSearchKey string
+	AlcoholNameKO                  string
+	AlcoholNameEN                  string
+	AlcoholCategoryKO              string
+	AlcoholCategoryEN              string
+	AlcoholRegionKO                string
+	AlcoholRegionEN                string
+	AlcoholABV                     string
+	CaskCandidate                  string
+	DistilleryNameKOCandidate      string
+	DistilleryNameENCandidate      string
+	ManufactureCountryNameKO       string
+	ManufactureCountryNameEN       string
+	ManufactureCountryAlpha2       string
+	ManufactureCountryAlpha3       string
+	ExportCountryNameKO            string
+	ExportCountryNameEN            string
+	ExportCountryAlpha2            string
+	ExportCountryAlpha3            string
 }
 
 // Result is the parser's deterministic, non-destructive decision.

@@ -109,7 +109,9 @@ func (s *Store) Claim(
 			SELECT d.id, d.rcno, d.source_item_id, HEX(i.semantic_sha256),
 			       COALESCE(i.product_name_ko, ''), COALESCE(i.product_name_en, ''),
 			       COALESCE(i.item_name, ''), COALESCE(i.importer_name, ''),
-			       COALESCE(i.overseas_establishment_name, ''), COALESCE(i.expiry_text, ''),
+			       COALESCE(i.overseas_establishment_name, ''),
+			       COALESCE(i.manufacture_country_name, ''), COALESCE(i.export_country_name, ''),
+			       COALESCE(i.expiry_text, ''),
 			       i.processed_date, d.claim_attempts
 			FROM declarations AS d
 			JOIN items AS i ON i.id = d.source_item_id
@@ -185,7 +187,8 @@ func (s *Store) Preview(
 	rows, err := s.db.QueryContext(ctx, `
 		WITH latest_items AS (
 			SELECT id, rcno, semantic_sha256, product_name_ko, product_name_en,
-			       item_name, importer_name, overseas_establishment_name, expiry_text,
+			       item_name, importer_name, overseas_establishment_name,
+			       manufacture_country_name, export_country_name, expiry_text,
 			       processed_date,
 			       ROW_NUMBER() OVER (
 			           PARTITION BY rcno ORDER BY observed_at DESC, id DESC
@@ -195,7 +198,9 @@ func (s *Store) Preview(
 		SELECT COALESCE(d.id, 0), latest.rcno, latest.id, HEX(latest.semantic_sha256),
 		       COALESCE(latest.product_name_ko, ''), COALESCE(latest.product_name_en, ''),
 		       COALESCE(latest.item_name, ''), COALESCE(latest.importer_name, ''),
-		       COALESCE(latest.overseas_establishment_name, ''), COALESCE(latest.expiry_text, ''),
+		       COALESCE(latest.overseas_establishment_name, ''),
+		       COALESCE(latest.manufacture_country_name, ''), COALESCE(latest.export_country_name, ''),
+		       COALESCE(latest.expiry_text, ''),
 		       latest.processed_date, COALESCE(d.claim_attempts, 0)
 		FROM latest_items AS latest
 		LEFT JOIN declarations AS d ON d.rcno = latest.rcno
@@ -266,7 +271,16 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		    edition_name = ?, material_code = ?, cask_number = ?, batch_number = ?,
 		    lot_number = ?, manufacture_number = ?, expiry_raw = ?, expiry_start = ?, expiry_end = ?,
 		    importer_base_name = ?, importer_search_key = ?, legal_entity_type = ?,
-		    overseas_establishment_search_key = ?, normalization_status = ?,
+		    overseas_establishment_search_key = ?,
+		    alcohol_name_ko = ?, alcohol_name_en = ?,
+		    alcohol_category_ko = ?, alcohol_category_en = ?,
+		    alcohol_region_ko = ?, alcohol_region_en = ?, alcohol_abv = ?,
+		    cask_candidate = ?, distillery_name_ko_candidate = ?, distillery_name_en_candidate = ?,
+		    manufacture_country_name_ko = ?, manufacture_country_name_en = ?,
+		    manufacture_country_alpha2 = ?, manufacture_country_alpha3 = ?,
+		    export_country_name_ko = ?, export_country_name_en = ?,
+		    export_country_alpha2 = ?, export_country_alpha3 = ?,
+		    normalization_status = ?,
 		    normalization_version = ?, normalization_reasons = ?, unparsed_fragments_json = ?,
 		    normalized_at = ?, claim_owner = NULL, claim_lease_until = NULL,
 		    claim_next_attempt_at = NULL, claim_last_error = NULL,
@@ -285,7 +299,16 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		nullableString(fields.EditionName), nullableString(fields.MaterialCode), nullableString(fields.CaskNumber), nullableString(fields.BatchNumber),
 		nullableString(fields.LotNumber), nullableString(fields.ManufactureNumber), nullableString(fields.ExpiryRaw), nullableTime(fields.ExpiryStart), nullableTime(fields.ExpiryEnd),
 		nullableString(fields.ImporterBaseName), nullableString(fields.ImporterSearchKey), nullableString(fields.LegalEntityType),
-		nullableString(fields.OverseasEstablishmentSearchKey), string(completion.Result.Status),
+		nullableString(fields.OverseasEstablishmentSearchKey),
+		nullableString(fields.AlcoholNameKO), nullableString(fields.AlcoholNameEN),
+		nullableString(fields.AlcoholCategoryKO), nullableString(fields.AlcoholCategoryEN),
+		nullableString(fields.AlcoholRegionKO), nullableString(fields.AlcoholRegionEN), nullableString(fields.AlcoholABV),
+		nullableString(fields.CaskCandidate), nullableString(fields.DistilleryNameKOCandidate), nullableString(fields.DistilleryNameENCandidate),
+		nullableString(fields.ManufactureCountryNameKO), nullableString(fields.ManufactureCountryNameEN),
+		nullableString(fields.ManufactureCountryAlpha2), nullableString(fields.ManufactureCountryAlpha3),
+		nullableString(fields.ExportCountryNameKO), nullableString(fields.ExportCountryNameEN),
+		nullableString(fields.ExportCountryAlpha2), nullableString(fields.ExportCountryAlpha3),
+		string(completion.Result.Status),
 		nullableString(completion.NormalizationVersion), reasons, fragments, completion.NormalizedAt,
 		string(completion.Result.Status), completion.Source.DeclarationID, completion.Source.RCNO,
 		completion.Source.SourceItemID, completion.Source.ClaimOwner, completion.Source.ClaimAttempt,
@@ -360,7 +383,8 @@ func scanNormalizationSource(scanner normalizationSourceScanner) (normalization.
 	err := scanner.Scan(
 		&source.DeclarationID, &source.RCNO, &source.SourceItemID, &source.SemanticHash,
 		&source.ProductNameKO, &source.ProductNameEN, &source.ItemName, &source.ImporterName,
-		&source.OverseasEstablishmentName, &source.ExpiryText, &processedDate, &attempts,
+		&source.OverseasEstablishmentName, &source.ManufactureCountryName, &source.ExportCountryName,
+		&source.ExpiryText, &processedDate, &attempts,
 	)
 	if err != nil {
 		return normalization.Source{}, 0, err

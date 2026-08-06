@@ -702,6 +702,25 @@ ROW_NUMBER() OVER (
 | 제품키 제외 | RCNO, 명시 LOT·제조번호, 패턴이 확인된 접미 `L` 코드, 박스 입수량, 제조국·수출국 |
 | 변형 금지 | 원문 HTML, 제조국·수출국 병합, 의미 특수문자 일괄 제거, 성분 `%`의 도수 변환, `구형↔OLD` 치환, `NEW/LEGACY/RESERVE/CLASSIC` 일괄 제거, 정규화 키 자동 병합 |
 
+### 9.1 BottleNote 제품 상세 호환 후보
+
+1차 정제는 BottleNote `AlcoholDetailItem`과 유사한 형태를 만들되, 원장만으로 확정할 수 없는 값은 후보로 구분한다.
+
+| 구분 | 정제 컬럼 | 근거 |
+|---|---|---|
+| 직접 정제 | `alcohol_name_ko`, `alcohol_name_en` | 원문 제품명에서 용량·도수·LOT·제조번호만 분리 |
+| 직접 정제 | `alcohol_category_ko`, `alcohol_category_en` | 식약처 품목명 4종의 고정 매핑 |
+| 직접 정제 | `alcohol_region_ko`, `alcohol_region_en` | 제조국을 지역 1단계 후보로 사용 |
+| 직접 정제 | `alcohol_abv` | 명시적으로 확정된 `abv_percent`를 `%` 문자열로 변환 |
+| 후보 | `cask_candidate` | 제품명에 캐스크 종류가 명시된 경우에만 추출 |
+| 후보 | `distillery_name_ko_candidate`, `distillery_name_en_candidate` | 해외제조업소명을 증류소로 확정하지 않고 언어별 후보로 보존 |
+
+- 제조국과 수출국은 각각 한글명, 영문명, ISO 3166-1 Alpha-2, Alpha-3를 저장한다.
+- 현재 원장에 존재하는 61개 국가명을 정적 카탈로그로 관리한다.
+- 제조국은 BottleNote 지역 후보에 사용하지만 수출국은 지역 후보에 사용하지 않는다.
+- 매핑되지 않은 국가나 품목은 추정하지 않고 `REVIEW_REQUIRED` 사유를 기록한다.
+- `cask_number`는 캐스크 번호이고 `cask_candidate`는 캐스크 종류이므로 서로 대체하지 않는다.
+
 ## 10. 변경과 검증 원칙
 
 - 규칙 변경 시 `normalization_version`을 올린다.

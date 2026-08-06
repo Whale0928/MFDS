@@ -8,10 +8,12 @@ import (
 )
 
 var (
-	volumePattern         = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9])((?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(?:ml|l))\b`)
-	packagePattern        = regexp.MustCompile(`(?i)^\s*[*x×]\s*(\d+)\b`)
-	packageTokenPattern   = regexp.MustCompile(`(?i)\s*[*x×]\s*\d+\b`)
-	packageDisplayPattern = regexp.MustCompile(`(?i)(\d+ml)\s*[*x×]\s*\d+\b`)
+	volumePattern = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9])((?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(?:ml|l))\b`)
+	// packagePattern reads the count that directly follows a matched volume token, so its multiplier is already in volume context.
+	packagePattern = regexp.MustCompile(`^\s*[*x×X]\s*(\d+)`)
+	// packageTokenPattern requires the volume + multiplier + count context. Case folding is off so an X inside a code is never consumed.
+	packageTokenPattern   = regexp.MustCompile(`((?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(?:[mM][lL]|[lL]))\s*[*x×X]\s*\d+\s*(?:BTLS?|BOTTLES?|EA|PCS|병)?`)
+	packageDisplayPattern = regexp.MustCompile(`(?i)(\d+ml)\s*[*x×]\s*\d+`)
 )
 
 type volumeMatch struct {

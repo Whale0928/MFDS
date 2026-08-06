@@ -15,8 +15,8 @@ func Normalize(input Input) Result {
 	parseVintage(input.ProductNameKO, input.ProductNameEN, &state)
 	parseExpiry(input.ExpiryText, &state)
 	parseCompany(input.ImporterName, input.OverseasEstablishmentName, &state)
-	result.SKUDisplayNameKO = displayName(input.ProductNameKO, volume)
-	result.SKUDisplayNameEN = displayName(input.ProductNameEN, volume)
+	result.SKUDisplayNameKO = displayName(input.ProductNameKO, volume, result.ABVPercent)
+	result.SKUDisplayNameEN = displayName(input.ProductNameEN, volume, result.ABVPercent)
 	result.BaseProductNameKO = baseName(result.SKUDisplayNameKO)
 	result.BaseProductNameEN = baseName(result.SKUDisplayNameEN)
 	result.NameSearchKeyKO = searchKey(result.BaseProductNameKO)
@@ -24,10 +24,12 @@ func Normalize(input Input) Result {
 	if strings.TrimSpace(input.ProductNameEN) != "" {
 		result.NameSearchKeyKO = canonicalizeKoreanSearchKey(result.NameSearchKeyKO)
 	}
+	deriveAlcoholCandidate(input, &state)
 	if isGenericProductName(result) {
 		state.review(ReasonGenericProductName, result.BaseProductNameKO+" "+result.BaseProductNameEN)
 	} else if hasSourceName(input) && result.UnitVolumeML == nil {
-		state.review(ReasonVolumeMissing, "")
+		// 80% of the ledger carries no volume token. A missing key component blocks the candidate key but is not a review signal.
+		state.add(ReasonVolumeMissing)
 	} else if hasSourceName(input) {
 		result.SKUCandidateKeySHA256 = candidateHash(result)
 	}

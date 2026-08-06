@@ -9,7 +9,8 @@ import (
 
 var (
 	compositionPattern = regexp.MustCompile(`인삼|송이|향|과즙|농축|원액|함유`)
-	strongABVPattern   = regexp.MustCompile(`(?i)(?:ALC\.?\s*|)(\d+(?:\.\d+)?)\s*%\s*(?:VOL\.?\b|$|\))`)
+	// RE2 has no lookahead, so the closing parenthesis is captured in group 2 and restored by every replacement.
+	strongABVPattern = regexp.MustCompile(`(?i)(?:ALC\.?\s*|)(\d+(?:\.\d+)?)\s*%\s*(?:VOL\.?\b|(\))|$)`)
 	koABVPattern       = regexp.MustCompile(`(?:주도\s*)?(\d+(?:\.\d+)?)\s*(?:%|도)\s*$|\((\d+(?:\.\d+)?)\s*%\)`)
 	percentPattern     = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
 	proofPattern       = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:PROOF|프루프)`)
@@ -46,7 +47,7 @@ func parseABV(ko, en string, state *derivationState) {
 			if value, err := strconv.ParseFloat(valueText, 64); err == nil {
 				candidates = append(candidates, value)
 				if state.result.ABVRaw == "" {
-					state.result.ABVRaw = match[0]
+					state.result.ABVRaw = strings.Trim(strings.TrimSpace(match[0]), "(), ")
 				}
 			}
 			continue

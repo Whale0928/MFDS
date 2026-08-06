@@ -299,9 +299,11 @@ func TestNormalize_SKU후보키는확정값만포함한다(t *testing.T) {
 	}
 }
 
-func TestNormalize_용량미확인_후보키없이검토대상으로남긴다(t *testing.T) {
+// 용량 미확인은 원장 80%가 해당하는 정상 상태이므로 검토 사유가 아니다.
+// 후보키는 여전히 만들지 않아 용량이 확인된 SKU와 자동 병합되지 않는다.
+func TestNormalize_용량미확인_후보키없이사유만남긴다(t *testing.T) {
 	result := Normalize(Input{ProductNameKO: "OLD FORESTER", ProductNameEN: "OLD FORESTER"})
-	if result.Status != StatusReviewRequired || result.SKUCandidateKeySHA256 != "" || !hasReason(result, ReasonVolumeMissing) {
+	if result.Status != StatusNormalized || result.SKUCandidateKeySHA256 != "" || !hasReason(result, ReasonVolumeMissing) {
 		t.Fatalf("result = %+v", result)
 	}
 }
