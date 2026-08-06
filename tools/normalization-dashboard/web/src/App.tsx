@@ -29,12 +29,13 @@ export default function App() {
   const [country, setCountry] = useState('')
   const [reason, setReason] = useState('')
   const [page, setPage] = useState(1)
+  const [reviewPage, setReviewPage] = useState(1)
   const [selected, setSelected] = useState<Declaration | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const filterLoad = useMemo(() => api.filters, [])
   const qualityLoad = useMemo(() => api.quality, [])
   const declarationLoad = useMemo(() => () => api.declarations({ page, page_size: PAGE_SIZE, q: query || undefined, status: status || undefined, item_name: itemName || undefined, importer: importer || undefined, country: country || undefined, reason: reason || undefined }), [page, query, status, itemName, importer, country, reason])
-  const reviewLoad = useMemo(() => () => api.declarations({ page: 1, page_size: PAGE_SIZE, status: 'REVIEW_REQUIRED' }), [])
+  const reviewLoad = useMemo(() => () => api.declarations({ page: reviewPage, page_size: PAGE_SIZE, status: 'REVIEW_REQUIRED' }), [reviewPage])
   const filters = useRemote<Filters>(filterLoad, blankFilters)
   const quality = useRemote<Quality>(qualityLoad, null)
   const declarations = useRemote<DeclarationPage>(declarationLoad, null)
@@ -57,7 +58,7 @@ export default function App() {
     </header>
 
     {section === 'browse' && <BrowseView page={declarations.data} loading={declarations.loading} error={declarations.error} filters={filters.data ?? blankFilters} query={query} status={status} itemName={itemName} importer={importer} country={country} reason={reason} onQuery={setQuery} onStatus={setStatus} onItemName={setItemName} onImporter={setImporter} onCountry={setCountry} onReason={setReason} onOpen={openDetail} pageNumber={page} onPage={setPage} />}
-    {section === 'review' && <ReviewView quality={quality.data} loading={quality.loading || reviews.loading} error={quality.error ?? reviews.error} declarations={reviews.data} onOpen={openDetail} />}
+    {section === 'review' && <ReviewView quality={quality.data} loading={quality.loading || reviews.loading} error={quality.error ?? reviews.error} declarations={reviews.data} onOpen={openDetail} pageNumber={reviewPage} onPage={setReviewPage} />}
     {section === 'quality' && <QualityView quality={quality.data} loading={quality.loading} error={quality.error} />}
 
     {detailError && <div className="detail-error" role="alert"><span>{detailError}</span><button onClick={() => setDetailError(null)}>닫기</button></div>}
@@ -83,8 +84,10 @@ function BrowseView({ page, loading, error, filters, query, status, itemName, im
   </div>
 }
 
-function ReviewView({ quality, loading, error, declarations, onOpen }: { quality: Quality | null; loading: boolean; error: string | null; declarations: DeclarationPage | null; onOpen: (entry: Declaration) => void }) {
+function ReviewView({ quality, loading, error, declarations, onOpen, pageNumber, onPage }: { quality: Quality | null; loading: boolean; error: string | null; declarations: DeclarationPage | null; onOpen: (entry: Declaration) => void; pageNumber: number; onPage: (value: number) => void }) {
   const reviewItems = declarations?.declarations ?? []
+  const reviewTotal = declarations?.total ?? 0
+  const reviewPages = Math.max(1, Math.ceil(reviewTotal / PAGE_SIZE))
   const distributions = quality?.review_distributions
   return <div className="page">
     <PageTitle title="사람이 봐야 하는 건" copy="값끼리 어긋나거나 뜻이 여러 갈래여서 자동 판단을 멈춘 건입니다. 값을 지어내지 않고 원문을 그대로 둔 채 이유를 남겼습니다." />
@@ -96,7 +99,10 @@ function ReviewView({ quality, loading, error, declarations, onOpen }: { quality
       </div>
       <section className="review-distributions" aria-label="확인 필요 건의 분포">{([['품목', distributions?.items, undefined], ['수입사', distributions?.importers, undefined], ['제조 국가', distributions?.countries, undefined], ['정제 상태', distributions?.statuses, statusLabel]] as Array<[string, Array<{ name: string; count: number }> | undefined, ((value: string) => string) | undefined]>).map(([label, data, labeller]) => <article className="panel" key={label}><h2>{label}별 분포</h2><BarChart data={(data ?? []).map((entry) => ({ ...entry, name: labeller ? labeller(entry.name) : entry.name }))} /></article>)}</section>
     </>}
-    <section className="panel review-list"><div className="panel__head"><h2>확인 대상 목록</h2><span className="muted">줄을 눌러 그 건의 값을 전부 확인</span></div>{reviewItems.length ? <DeclarationTable entries={reviewItems} onOpen={onOpen} compact /> : <p className="empty-inline">확인이 필요한 건이 없습니다.</p>}</section>
+    <section className="panel review-list">
+      <div className="panel__head"><h2>확인 대상 목록 {number(reviewTotal)}건</h2><span className="muted">줄을 눌러 그 건의 값을 전부 확인</span></div>
+      {reviewItems.length ? <><DeclarationTable entries={reviewItems} onOpen={onOpen} compact /><div className="pagination"><button disabled={pageNumber <= 1} onClick={() => onPage(pageNumber - 1)}>이전</button><span>{pageNumber} / {reviewPages}</span><button disabled={pageNumber >= reviewPages} onClick={() => onPage(pageNumber + 1)}>다음</button></div></> : <p className="empty-inline">확인이 필요한 건이 없습니다.</p>}
+    </section>
   </div>
 }
 

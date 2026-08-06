@@ -194,6 +194,26 @@ func TestDetailColumns_원장과정제를모두노출하고수집metadata는제�
 	}
 }
 
+// 원장과 정제를 좌우로 비교하려면 모든 그룹이 한쪽으로 확실히 갈려야 한다.
+func TestGroupSide_원장과정제를좌우로가른다(t *testing.T) {
+	sides := map[string][]string{}
+	for _, column := range detailColumns {
+		side := groupSide(column.Group)
+		if side != "ledger" && side != "normalized" {
+			t.Fatalf("그룹 %q 의 side 가 %q 다", column.Group, side)
+		}
+		if len(sides[side]) == 0 || sides[side][len(sides[side])-1] != column.Group {
+			sides[side] = append(sides[side], column.Group)
+		}
+	}
+	if len(sides["ledger"]) == 0 || len(sides["normalized"]) == 0 {
+		t.Fatalf("한쪽이 비었다: %#v", sides)
+	}
+	if groupSide("원장 - 수집한 그대로") != "ledger" || groupSide("제품명 정제 결과") != "normalized" {
+		t.Fatal("대표 그룹이 반대쪽에 있다")
+	}
+}
+
 // 모든 필드에 각주가 붙어 있어야 화면에서 용어를 설명할 수 있다.
 func TestDetailColumns_모든필드가라벨과각주를가진다(t *testing.T) {
 	for _, column := range detailColumns {

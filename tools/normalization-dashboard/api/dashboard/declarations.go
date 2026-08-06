@@ -158,7 +158,7 @@ func (s *Server) detailGroups(r *http.Request, rcno string) ([]detailGroup, erro
 		if !seen {
 			slot = len(groups)
 			index[column.Group] = slot
-			groups = append(groups, detailGroup{Title: column.Group})
+			groups = append(groups, detailGroup{Title: column.Group, Side: groupSide(column.Group)})
 		}
 		groups[slot].Fields = append(groups[slot].Fields, detailField{Label: column.Label, Hint: column.Hint, Value: values[position]})
 	}

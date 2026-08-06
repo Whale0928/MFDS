@@ -44,6 +44,7 @@ export interface DetailField {
 
 export interface DetailGroup {
   title: string
+  side: 'ledger' | 'normalized' | string
   fields: DetailField[]
 }
 

@@ -9,6 +9,17 @@ type detailColumn struct {
 	Hint  string
 }
 
+// 상세 화면은 원장과 정제 결과를 좌우로 나눠 따로 스크롤한다.
+// 식약처가 준 값은 ledger, 우리가 만들어낸 값은 normalized 쪽에 놓는다.
+func groupSide(group string) string {
+	switch group {
+	case "신고 정보", "원장 - 수집한 그대로":
+		return "ledger"
+	default:
+		return "normalized"
+	}
+}
+
 // 노출 대상은 사람이 읽는 업무 값으로 한정한다.
 // 원본 HTML, 행 해시, 수집 job/task/fetch 식별자, 수집 URL, 점유(claim) 상태는 반환하지 않는다.
 var detailColumns = []detailColumn{

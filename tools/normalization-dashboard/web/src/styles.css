@@ -34,17 +34,29 @@ nav { display: flex; height: 72px; align-items: stretch; gap: 3px; } nav button 
 .hint:focus-visible .hint__mark { outline: 2px solid #8f4924; outline-offset: 2px; }
 .declaration-table__header .hint__bubble, .sku-table__head .hint__bubble { bottom: auto; top: calc(100% + 8px); }
 
-/* 상세 패널: 원장과 정제 값을 그룹으로 모두 노출한다 */
-.drawer { width: min(680px, 100%); }
+/* 상세 패널: 원장과 정제를 좌우로 나눠 각각 따로 스크롤한다 */
+.drawer { width: min(1180px, 100%); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.drawer__head { flex: none; padding: 26px 30px 0; }
 .drawer__kicker { margin: 0; color: #8f4924; font-size: 12px; letter-spacing: .02em; }
-.drawer__toggle { margin: 22px 0 4px; padding-top: 16px; border-top: 1px solid #ddd3c5; }
-.drawer__toggle label { display: inline-flex; align-items: center; gap: 7px; color: #566274; font-size: 13px; cursor: pointer; }
-.field-group { padding-top: 20px; }
-.field-group h3 { margin: 0 0 10px; color: #213146; font: 800 19px "Nanum Myeongjo", serif; }
-.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin: 0; }
-.field-grid > div { min-width: 0; border-top: 1px solid #ddd3c5; padding-top: 8px; }
+.drawer h2 { padding-top: 10px; }
+.drawer__meta { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 10px 0 14px; }
+.drawer__toggle label, .drawer__toggle { display: inline-flex; align-items: center; gap: 7px; color: #566274; font-size: 13px; cursor: pointer; }
+.drawer__reasons { border-top: 1px solid #ddd3c5; }
+.drawer__reasons summary { padding: 11px 0; color: #213146; font-weight: 700; font-size: 14px; cursor: pointer; }
+.drawer__reasons[open] summary { border-bottom: 1px solid #e5dcd0; }
+.drawer__columns { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; border-top: 3px solid #c47a43; }
+.drawer__column { min-height: 0; min-width: 0; overflow-y: auto; padding: 0 22px 30px; }
+.drawer__column + .drawer__column { border-left: 1px solid #d8cec0; background: rgba(255, 251, 243, .55); }
+.drawer__column-head { position: sticky; top: 0; z-index: 2; padding: 16px 0 10px; background: #fffaf1; border-bottom: 1px solid #ddd3c5; }
+.drawer__column + .drawer__column .drawer__column-head { background: #fdf6ea; }
+.drawer__column-head h3 { margin: 0; color: #142236; font: 800 20px "Nanum Myeongjo", serif; }
+.drawer__column-head p { margin: 3px 0 0; color: #7a8697; font-size: 12px; }
+.field-group { padding-top: 18px; }
+.field-group h4 { margin: 0 0 8px; color: #8f4924; font: 700 13px system-ui, sans-serif; letter-spacing: .01em; }
+.field-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 0; }
+.field-grid > div { min-width: 0; border-top: 1px solid #e5dcd0; padding-top: 7px; }
 .field-grid dt { color: #7a8697; font-size: 12px; }
-.field-grid dd { margin: 4px 0 0; color: #223246; font-size: 14px; line-height: 1.5; word-break: break-word; }
+.field-grid dd { margin: 3px 0 0; color: #223246; font-size: 14px; line-height: 1.5; word-break: break-word; }
 .evidence__row--reason { grid-template-columns: 1fr auto; }
 .evidence__row--reason i { color: #8d97a6; font: 10px "DM Mono", monospace; }
 
@@ -52,4 +64,5 @@ nav { display: flex; height: 72px; align-items: stretch; gap: 3px; } nav button 
 .panel__lead { margin: -8px 0 16px; color: #6b7889; font-size: 13px; line-height: 1.6; }
 .filter-bar__count { white-space: nowrap; }
 
-@media (max-width: 720px) { .field-grid { grid-template-columns: 1fr; } .hint__bubble { max-width: 220px; } }
+@media (max-width: 900px) { .drawer__columns { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } .drawer__column + .drawer__column { border-left: 0; border-top: 1px solid #d8cec0; } }
+@media (max-width: 720px) { .drawer__head { padding: 20px 18px 0; } .drawer__column { padding: 0 16px 20px; } .hint__bubble { max-width: 220px; } }

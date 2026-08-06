@@ -68,6 +68,7 @@ type detailField struct {
 }
 type detailGroup struct {
 	Title  string        `json:"title"`
+	Side   string        `json:"side"`
 	Fields []detailField `json:"fields"`
 }
 
