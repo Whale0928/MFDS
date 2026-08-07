@@ -1,0 +1,200 @@
+name: release image
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-image-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: bottlenote-mfds-crawler
+
+jobs:
+  gate:
+    name: validate release and run tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      release-tag: ${{ steps.release.outputs.release-tag }}
+      version: ${{ steps.release.outputs.version }}
+      tag-sha: ${{ steps.release.outputs.tag-sha }}
+    steps:
+      - name: checkout repository with submodules
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+          token: ${{ secrets.GIT_ACCESS_TOKEN }}
+
+      - name: validate published release
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_DRAFT: ${{ github.event.release.draft }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "$RELEASE_TAG" ]] || { echo "::error::release tag is required"; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::expected tag like v1.2.3, got: $RELEASE_TAG"; exit 1; }
+          [[ "$IS_DRAFT" == "false" ]] || { echo "::error::draft release cannot be shipped"; exit 1; }
+          [[ "$IS_PRERELEASE" == "false" ]] || { echo "::error::prerelease cannot be shipped"; exit 1; }
+
+          version="${RELEASE_TAG#v}"
+
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          git merge-base --is-ancestor "$tag_sha" origin/main \
+            || { echo "::error::tag commit is not contained in origin/main: $tag_sha"; exit 1; }
+
+          {
+            echo "release-tag=$RELEASE_TAG"
+            echo "version=$version"
+            echo "tag-sha=$tag_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: setup go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: vet and test
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test -count=1 ./...
+
+  build-push:
+    name: build and push multi-arch image
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: checkout release tag with submodules
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.release-tag }}
+          submodules: true
+          token: ${{ secrets.GIT_ACCESS_TOKEN }}
+
+      - name: install sops
+        env:
+          SOPS_VERSION: 3.11.0
+          SOPS_SHA256: 775f1384d55decfad228e7196a3f683791914f92a473f78fc47700531c29dfef
+        run: |
+          set -euo pipefail
+          # 시크릿을 다루는 job이라 서드파티 액션 대신 공식 릴리즈를 받아 체크섬을 확인한다.
+          curl -sSfL -o "$RUNNER_TEMP/sops" \
+            "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64"
+          echo "${SOPS_SHA256}  ${RUNNER_TEMP}/sops" | sha256sum -c -
+          install -m 0755 "$RUNNER_TEMP/sops" /usr/local/bin/sops
+          sops --version --disable-version-check
+
+      - name: load registry credentials
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          # 복호화 결과는 stdout으로 내보내지 않는다. 파일로 받아 값마다 마스크를 건 뒤
+          # GITHUB_ENV로만 넘긴다. GITHUB_ENV 내용은 로그에 출력되지 않는다.
+          sops decrypt \
+            git.environment-variables/storage/docker-registry/registry.sops.env \
+            > "$RUNNER_TEMP/registry.env"
+
+          while IFS='=' read -r key value; do
+            case "$key" in
+              REGISTRY_ADDRESS|REGISTRY_USERNAME|REGISTRY_PASSWORD|COSIGN_PASSWORD) ;;
+              *) continue ;;
+            esac
+            value="${value%\"}"
+            value="${value#\"}"
+            [[ -n "$value" ]] || { echo "::error::empty value for $key"; exit 1; }
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done < "$RUNNER_TEMP/registry.env"
+
+          shred -u "$RUNNER_TEMP/registry.env" 2>/dev/null || rm -f "$RUNNER_TEMP/registry.env"
+          echo "registry credentials loaded and masked"
+
+      - name: setup buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: login to registry
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_PASSWORD" \
+            | docker login "$REGISTRY_ADDRESS" --username "$REGISTRY_USERNAME" --password-stdin
+
+      - name: reject existing image tag
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY_ADDRESS}/${IMAGE_NAME}:${VERSION}"
+
+          if docker manifest inspect "$image" > /dev/null 2> "$RUNNER_TEMP/manifest-error.log"; then
+            echo "::error::image tag already exists and must not be overwritten"
+            exit 1
+          fi
+          if ! grep -Eqi 'manifest unknown|no such manifest|not found|NAME_UNKNOWN' \
+            "$RUNNER_TEMP/manifest-error.log"; then
+            echo "::error::failed to determine whether the image tag exists"
+            exit 1
+          fi
+          echo "image tag is free"
+
+      - name: build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:${{ needs.gate.outputs.version }}
+          build-args: |
+            GIT_COMMIT=${{ needs.gate.outputs.tag-sha }}
+          cache-from: type=registry,ref=${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:cache
+          cache-to: type=registry,ref=${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:cache,mode=max
+
+      - name: install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: sign image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes \
+            --key git.environment-variables/storage/docker-registry/cosign.key \
+            --tlog-upload=false \
+            "${REGISTRY_ADDRESS}/${IMAGE_NAME}@${DIGEST}"
+
+      - name: write summary
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "## MFDS crawler image"
+            echo "- Release: \`${{ needs.gate.outputs.release-tag }}\`"
+            echo "- Image tag: \`${IMAGE_NAME}:${VERSION}\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- Digest: \`${DIGEST}\`"
+            echo "- Signed: \`cosign\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: logout
+        if: always()
+        run: docker logout "${REGISTRY_ADDRESS:-}" || true
