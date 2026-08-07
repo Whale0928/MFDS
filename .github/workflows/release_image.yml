@@ -153,6 +153,23 @@ jobs:
           fi
           echo "image tag is free"
 
+      - name: install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          # cosign 4는 --tlog-upload=false를 signing-config 없이 거부한다.
+          # 비공개 레지스트리라 투명성 로그를 쓰지 않으므로 2.x 최신을 고정한다.
+          cosign-release: v2.6.5
+
+      - name: verify signing key before push
+        run: |
+          set -euo pipefail
+          # 서명은 푸시 뒤에만 가능한데, 여기서 실패하면 태그만 소모되고 서명 없는
+          # 이미지가 남는다. 키와 암호와 cosign 버전을 미리 확인해 그 상태를 막는다.
+          cosign public-key \
+            --key git.environment-variables/storage/docker-registry/cosign.key \
+            > /dev/null
+          echo "signing key and password verified"
+
       - name: build and push
         id: build
         uses: docker/build-push-action@v7
@@ -167,9 +184,6 @@ jobs:
             GIT_COMMIT=${{ needs.gate.outputs.tag-sha }}
           cache-from: type=registry,ref=${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:cache
           cache-to: type=registry,ref=${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:cache,mode=max
-
-      - name: install cosign
-        uses: sigstore/cosign-installer@v4.1.2
 
       - name: sign image
         env:
