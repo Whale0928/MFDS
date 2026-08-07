@@ -18,6 +18,63 @@ tasks:
     cmds:
       - npm run dev -- --host 127.0.0.1
 
+  serve:
+    desc: API와 web을 launchd 서비스로 올려 터미널과 무관하게 유지합니다
+    vars:
+      API_LABEL: com.bottlenote.mfds.normalization-dashboard-api
+      WEB_LABEL: com.bottlenote.mfds.normalization-dashboard-web
+      API_LOG: /tmp/mfds-normalization-dashboard-api.log
+      WEB_LOG: /tmp/mfds-normalization-dashboard-web.log
+    preconditions:
+      - sh: test -n "$(sed -n 's/^MFDS_DEMO_DSN=//p' ../../.env.local)"
+        msg: MFDS_DEMO_DSN이 필요합니다. 루트에서 task setup을 먼저 실행하세요
+    cmds:
+      # 셸 세션이 끝나도 살아 있어야 시연 중에 화면이 죽지 않는다.
+      # launchd는 기본 PATH만 보므로 실행 파일과 작업 경로를 모두 절대 경로로 넘긴다.
+      - task: api:build
+      - |
+        root="$(pwd)"
+        if ! launchctl list "{{.API_LABEL}}" > /dev/null 2>&1; then
+          launchctl submit -l "{{.API_LABEL}}" -o "{{.API_LOG}}" -e "{{.API_LOG}}" -- \
+            /bin/sh -c "cd '$root/api' && MFDS_DEMO_DSN='$(sed -n 's/^MFDS_DEMO_DSN=//p' ../../.env.local)' ./dashboard-api"
+        fi
+        if ! launchctl list "{{.WEB_LABEL}}" > /dev/null 2>&1; then
+          launchctl submit -l "{{.WEB_LABEL}}" -o "{{.WEB_LOG}}" -e "{{.WEB_LOG}}" -- \
+            /bin/sh -c "cd '$root/web' && '$(command -v npm)' run dev -- --host 127.0.0.1"
+        fi
+        for _ in $(seq 1 40); do
+          api="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:8787/healthz || true)"
+          web="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:5173/ || true)"
+          [ "$api" = "200" ] && [ "$web" = "200" ] && break
+          sleep 1
+        done
+        if [ "$api" != "200" ] || [ "$web" != "200" ]; then
+          echo "기동 실패 (api=$api web=$web). {{.API_LOG}} 와 {{.WEB_LOG}} 를 확인하세요." >&2
+          exit 1
+        fi
+        echo "API 127.0.0.1:8787, web 127.0.0.1:5173 이 떴습니다. 중지는 serve:stop 입니다."
+
+  serve:stop:
+    desc: launchd로 올린 API와 web을 중지합니다
+    vars:
+      API_LABEL: com.bottlenote.mfds.normalization-dashboard-api
+      WEB_LABEL: com.bottlenote.mfds.normalization-dashboard-web
+    cmds:
+      # kill만 하면 launchd가 되살리므로 서비스 등록 자체를 지운다.
+      - |
+        stopped=0
+        for label in "{{.API_LABEL}}" "{{.WEB_LABEL}}"; do
+          if launchctl list "$label" > /dev/null 2>&1; then
+            launchctl remove "$label"
+            stopped=$((stopped + 1))
+          fi
+        done
+        if [ "$stopped" -gt 0 ]; then
+          echo "서비스 ${stopped}개를 중지했습니다."
+        else
+          echo "실행 중인 서비스가 없습니다."
+        fi
+
   tunnel:
     desc: 실행 중인 화면을 Cloudflare quick tunnel로 외부에 공개합니다
     vars:
