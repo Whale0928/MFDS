@@ -479,10 +479,12 @@ normalization_reasons
 
 | 상태 | 의미 |
 |---|---|
-| `normalized` | 안정된 규칙으로 구조화 완료 |
-| `partial` | 일부 값만 구조화하고 나머지는 원문 유지 |
-| `review_required` | 충돌 또는 모호한 문맥이 있어 검토 필요 |
-| `unparsed` | 지원하지 않는 형식 |
+| `PENDING` | 아직 정제하지 않은 초기 상태이며 컬럼 기본값 |
+| `NORMALIZED` | 안정된 규칙으로 구조화 완료 |
+| `PARTIAL` | 일부 값만 구조화하고 나머지는 원문 유지 |
+| `REVIEW_REQUIRED` | 충돌 또는 모호한 문맥이 있어 검토 필요 |
+| `UNPARSED` | 지원하지 않는 형식 |
+| `STALE` | 원본이 갱신되어 재정제가 필요 |
 
 `normalization_reasons`에는 적용 규칙과 검토 사유를 코드 형태로 남긴다.
 
@@ -527,77 +529,97 @@ FK는 두지 않는다. `source_item_id`는 추적용 논리 참조이며 RCNO �
 ```sql
 CREATE TABLE declarations
 (
-    id                                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    rcno                                 VARCHAR(32) NOT NULL,
+    id                                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    rcno                              VARCHAR(32) NOT NULL,
+    source_item_id                    BIGINT UNSIGNED NOT NULL,
 
-    source_item_id                       BIGINT UNSIGNED NOT NULL,
+    base_product_name_ko              TEXT NULL,
+    base_product_name_en              TEXT NULL,
+    sku_display_name_ko               TEXT NULL,
+    sku_display_name_en               TEXT NULL,
+    name_search_key_ko                TEXT NULL,
+    name_search_key_en                TEXT NULL,
+    sku_candidate_key_sha256          BINARY(32) NULL,
 
-    base_product_name_ko                 TEXT NULL,
-    base_product_name_en                 TEXT NULL,
-    sku_display_name_ko                  TEXT NULL,
-    sku_display_name_en                  TEXT NULL,
-    name_search_key_ko                   TEXT NULL,
-    name_search_key_en                   TEXT NULL,
-    sku_candidate_key_sha256             BINARY(32) NULL,
+    volume_raw                        VARCHAR(255) NULL,
+    volume_ml                         INT UNSIGNED NULL,
+    unit_volume_ml                    INT UNSIGNED NULL,
+    package_count                     INT UNSIGNED NULL,
+    abv_raw                           VARCHAR(255) NULL,
+    abv_percent                       DECIMAL(6, 3) NULL,
+    proof_raw                         VARCHAR(255) NULL,
+    proof_value                       DECIMAL(7, 3) NULL,
+    strength_type                     VARCHAR(64) NULL,
+    age_raw                           VARCHAR(255) NULL,
+    age_years                         SMALLINT UNSIGNED NULL,
+    vintage_raw                       VARCHAR(255) NULL,
+    vintage_year                      SMALLINT UNSIGNED NULL,
+    version_marker                    VARCHAR(64) NULL,
+    edition_name                      TEXT NULL,
+    material_code                     VARCHAR(255) NULL,
+    cask_number                       VARCHAR(255) NULL,
+    batch_number                      VARCHAR(255) NULL,
+    lot_number                        TEXT NULL,
+    manufacture_number                TEXT NULL,
 
-    volume_raw                           VARCHAR(255) NULL,
-    volume_ml                            INT UNSIGNED NULL,
-    unit_volume_ml                       INT UNSIGNED NULL,
-    package_count                        INT UNSIGNED NULL,
-    abv_raw                              VARCHAR(255) NULL,
-    abv_percent                          DECIMAL(6, 3) NULL,
-    proof_raw                            VARCHAR(255) NULL,
-    proof_value                          DECIMAL(7, 3) NULL,
-    strength_type                       VARCHAR(64) NULL,
-    age_raw                              VARCHAR(255) NULL,
-    age_years                            SMALLINT UNSIGNED NULL,
-    vintage_raw                          VARCHAR(255) NULL,
-    vintage_year                         SMALLINT UNSIGNED NULL,
-    version_marker                      VARCHAR(64) NULL,
-    edition_name                        TEXT NULL,
-    material_code                       VARCHAR(255) NULL,
-    cask_number                         VARCHAR(255) NULL,
-    batch_number                        VARCHAR(255) NULL,
-    lot_number                           TEXT NULL,
-    manufacture_number                   TEXT NULL,
+    expiry_raw                        TEXT NULL,
+    expiry_start                      DATE NULL,
+    expiry_end                        DATE NULL,
+    importer_base_name                TEXT NULL,
+    importer_search_key               TEXT NULL,
+    legal_entity_type                 VARCHAR(64) NULL,
+    overseas_establishment_search_key TEXT NULL,
 
-    expiry_raw                           TEXT NULL,
-    expiry_start                         DATE NULL,
-    expiry_end                           DATE NULL,
+    alcohol_name_ko                   TEXT NULL,
+    alcohol_name_en                   TEXT NULL,
+    alcohol_category_ko               VARCHAR(64) NULL,
+    alcohol_category_en               VARCHAR(64) NULL,
+    alcohol_region_ko                 VARCHAR(128) NULL,
+    alcohol_region_en                 VARCHAR(128) NULL,
+    alcohol_abv                       VARCHAR(32) NULL,
+    cask_candidate                    VARCHAR(255) NULL,
+    distillery_name_ko_candidate      TEXT NULL,
+    distillery_name_en_candidate      TEXT NULL,
+    manufacture_country_name_ko       VARCHAR(128) NULL,
+    manufacture_country_name_en       VARCHAR(128) NULL,
+    manufacture_country_alpha2        CHAR(2) NULL,
+    manufacture_country_alpha3        CHAR(3) NULL,
+    export_country_name_ko            VARCHAR(128) NULL,
+    export_country_name_en            VARCHAR(128) NULL,
+    export_country_alpha2             CHAR(2) NULL,
+    export_country_alpha3             CHAR(3) NULL,
 
-    importer_base_name                   TEXT NULL,
-    importer_search_key                  TEXT NULL,
-    legal_entity_type                    VARCHAR(64) NULL,
-    overseas_establishment_search_key    TEXT NULL,
+    normalization_status              VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    normalization_version             VARCHAR(64) NULL,
+    normalization_reasons             JSON NOT NULL DEFAULT (JSON_ARRAY()),
+    unparsed_fragments_json           JSON NOT NULL DEFAULT (JSON_ARRAY()),
+    normalized_at                     DATETIME(6) NULL,
 
-    normalization_status                 VARCHAR(32) NOT NULL DEFAULT 'UNPARSED',
-    normalization_version                VARCHAR(64) NULL,
-    normalization_reasons                JSON NOT NULL,
-    unparsed_fragments_json              JSON NOT NULL,
-    normalized_at                        DATETIME(6) NULL,
+    claim_owner                       VARCHAR(100) NULL,
+    claim_lease_until                 DATETIME(6) NULL,
+    claim_attempts                    INT UNSIGNED NOT NULL DEFAULT 0,
+    claim_next_attempt_at             DATETIME(6) NULL,
+    claim_last_error                  TEXT NULL,
 
-    review_status                        VARCHAR(32) NOT NULL DEFAULT 'NOT_REQUIRED',
-    reviewed_by                          VARCHAR(255) NULL,
-    reviewed_at                          DATETIME(6) NULL,
-    review_note                          TEXT NULL,
-
-    created_at                           DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    updated_at                           DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    review_status                     VARCHAR(32) NOT NULL DEFAULT 'NOT_REQUIRED',
+    reviewed_by                       VARCHAR(255) NULL,
+    reviewed_at                       DATETIME(6) NULL,
+    review_note                       TEXT NULL,
+    created_at                        DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at                        DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
         ON UPDATE CURRENT_TIMESTAMP(6),
 
     PRIMARY KEY (id),
     UNIQUE KEY uk_declarations_rcno (rcno),
     KEY idx_declarations_source_item (source_item_id),
-    KEY idx_declarations_sku_candidate
-        (sku_candidate_key_sha256, unit_volume_ml),
-    KEY idx_declarations_normalization
-        (normalization_status, updated_at),
-    KEY idx_declarations_review
-        (review_status, updated_at),
-    KEY idx_declarations_importer
-        (importer_base_name(191))
-) ENGINE=InnoDB ROW_FORMAT=DYNAMIC
-  COMMENT='RCNO별 원본 참조와 비파괴 정제 결과';
+    KEY idx_declarations_sku_candidate (sku_candidate_key_sha256, unit_volume_ml),
+    KEY idx_declarations_normalization (normalization_status, updated_at),
+    KEY idx_declarations_claim (normalization_status, claim_next_attempt_at, claim_lease_until),
+    KEY idx_declarations_review (review_status, updated_at),
+    KEY idx_declarations_importer (importer_base_name(191)),
+    KEY idx_declarations_alcohol_name (alcohol_name_ko(191)),
+    KEY idx_declarations_country (manufacture_country_alpha2, export_country_alpha2)
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC COMMENT='RCNO별 원본 참조와 비파괴 정제 결과';
 
 CREATE VIEW declaration_details AS
 SELECT d.*,
@@ -626,8 +648,8 @@ SELECT d.*,
        i.parser_version                AS source_parser_version,
        i.parser_warning                AS source_parser_warning,
        i.observed_at                   AS source_observed_at
-FROM declarations d
-JOIN items i ON i.id = d.source_item_id;
+FROM declarations AS d
+JOIN items AS i ON i.id = d.source_item_id;
 ```
 
 ### 8.3 컬럼 계약
@@ -657,9 +679,15 @@ JOIN items i ON i.id = d.source_item_id;
 #### 정제 상태 컬럼
 
 - `normalization_reasons`와 `unparsed_fragments_json`은 빈 배열 `[]`을 기본 형태로 사용한다.
-- `normalization_status`는 `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`, `UNPARSED`, `STALE`을 사용한다.
+- `normalization_status`는 `PENDING`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`, `UNPARSED`, `STALE`을 사용하며 기본값은 `PENDING`이다.
 - 원본 의미 해시가 바뀌면 기존 정제값을 신뢰하지 않고 `STALE`로 변경한다.
 - 정제 재실행 후 `normalization_version`과 `normalized_at`을 함께 갱신한다.
+
+#### 정제 작업 점유 컬럼
+
+- `claim_owner`와 `claim_lease_until`은 `PENDING`·`STALE` 행을 batch가 점유한 소유자와 lease 만료 시각이다.
+- `claim_attempts`와 `claim_next_attempt_at`은 시스템 오류 재시도 횟수와 다음 시도 가능 시각이며 `claim_last_error`에 마지막 원인을 남긴다.
+- 점유 컬럼은 작업 제어용이므로 정제 결과 값의 신뢰도를 나타내지 않는다.
 
 #### 리뷰 컬럼
 
