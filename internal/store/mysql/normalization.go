@@ -102,7 +102,9 @@ func (s *Store) Claim(
 	if err := validateNormalizationClaimRequest(request); err != nil {
 		return nil, err
 	}
-	leaseUntil := time.Now().Add(request.LeaseDuration)
+	// lease 만료는 DB 시계(NOW(6), Asia/Seoul)로만 계산한다. 앱 호스트 시계로 계산하면
+	// 비교 대상인 NOW(6)와 출처가 달라져 시계 차이만큼 lease가 일찍 끊기거나 늦게 풀린다.
+	leaseMicroseconds := request.LeaseDuration.Microseconds()
 	var sources []normalization.Source
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `
@@ -156,10 +158,11 @@ func (s *Store) Claim(
 			source := candidate.source
 			result, updateErr := tx.ExecContext(ctx, `
 				UPDATE declarations
-				SET claim_owner = ?, claim_lease_until = ?, claim_attempts = claim_attempts + 1,
+				SET claim_owner = ?, claim_lease_until = NOW(6) + INTERVAL ? MICROSECOND,
+				    claim_attempts = claim_attempts + 1,
 				    claim_next_attempt_at = NULL, claim_last_error = NULL
 				WHERE id = ? AND claim_attempts = ?
-			`, request.Owner, leaseUntil, source.DeclarationID, candidate.attempts)
+			`, request.Owner, leaseMicroseconds, source.DeclarationID, candidate.attempts)
 			if updateErr != nil {
 				return fmt.Errorf("normalization claim lease 설정 실패: %w", updateErr)
 			}
@@ -260,59 +263,91 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		return err
 	}
 	fields := completion.Result.Fields
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE declarations
-		SET base_product_name_ko = ?, base_product_name_en = ?,
-		    sku_display_name_ko = ?, sku_display_name_en = ?,
-		    name_search_key_ko = ?, name_search_key_en = ?, sku_candidate_key_sha256 = ?,
-		    volume_raw = ?, volume_ml = ?, unit_volume_ml = ?, package_count = ?,
-		    abv_raw = ?, abv_percent = ?, proof_raw = ?, proof_value = ?, strength_type = ?,
-		    age_raw = ?, age_years = ?, vintage_raw = ?, vintage_year = ?, version_marker = ?,
-		    edition_name = ?, material_code = ?, cask_number = ?, batch_number = ?,
-		    lot_number = ?, manufacture_number = ?, expiry_raw = ?, expiry_start = ?, expiry_end = ?,
-		    importer_base_name = ?, importer_search_key = ?, legal_entity_type = ?,
-		    overseas_establishment_search_key = ?,
-		    alcohol_name_ko = ?, alcohol_name_en = ?,
-		    alcohol_category_ko = ?, alcohol_category_en = ?,
-		    alcohol_region_ko = ?, alcohol_region_en = ?, alcohol_abv = ?,
-		    cask_candidate = ?, distillery_name_ko_candidate = ?, distillery_name_en_candidate = ?,
-		    manufacture_country_name_ko = ?, manufacture_country_name_en = ?,
-		    manufacture_country_alpha2 = ?, manufacture_country_alpha3 = ?,
-		    export_country_name_ko = ?, export_country_name_en = ?,
-		    export_country_alpha2 = ?, export_country_alpha3 = ?,
-		    normalization_status = ?,
-		    normalization_version = ?, normalization_reasons = ?, unparsed_fragments_json = ?,
-		    normalized_at = ?, claim_owner = NULL, claim_lease_until = NULL,
-		    claim_next_attempt_at = NULL, claim_last_error = NULL,
-		    review_status = CASE
+	status := string(completion.Result.Status)
+
+	assign := newColumnAssignments(60)
+	assign.set("base_product_name_ko", nullableString(fields.BaseProductNameKO))
+	assign.set("base_product_name_en", nullableString(fields.BaseProductNameEN))
+	assign.set("sku_display_name_ko", nullableString(fields.SKUDisplayNameKO))
+	assign.set("sku_display_name_en", nullableString(fields.SKUDisplayNameEN))
+	assign.set("name_search_key_ko", nullableString(fields.NameSearchKeyKO))
+	assign.set("name_search_key_en", nullableString(fields.NameSearchKeyEN))
+	assign.set("sku_candidate_key_sha256", key)
+
+	assign.set("volume_raw", nullableString(fields.VolumeRaw))
+	assign.set("volume_ml", nullableInt(fields.VolumeML))
+	assign.set("unit_volume_ml", nullableInt(fields.UnitVolumeML))
+	assign.set("package_count", nullableInt(fields.PackageCount))
+	assign.set("abv_raw", nullableString(fields.ABVRaw))
+	assign.set("abv_percent", nullableFloat(fields.ABVPercent))
+	assign.set("proof_raw", nullableString(fields.ProofRaw))
+	assign.set("proof_value", nullableFloat(fields.ProofValue))
+	assign.set("strength_type", nullableString(fields.StrengthType))
+	assign.set("age_raw", nullableString(fields.AgeRaw))
+	assign.set("age_years", nullableInt(fields.AgeYears))
+	assign.set("vintage_raw", nullableString(fields.VintageRaw))
+	assign.set("vintage_year", nullableInt(fields.VintageYear))
+	assign.set("version_marker", nullableString(fields.VersionMarker))
+	assign.set("edition_name", nullableString(fields.EditionName))
+	assign.set("material_code", nullableString(fields.MaterialCode))
+	assign.set("cask_number", nullableString(fields.CaskNumber))
+	assign.set("batch_number", nullableString(fields.BatchNumber))
+	assign.set("lot_number", nullableString(fields.LotNumber))
+	assign.set("manufacture_number", nullableString(fields.ManufactureNumber))
+
+	assign.set("expiry_raw", nullableString(fields.ExpiryRaw))
+	assign.set("expiry_start", nullableTime(fields.ExpiryStart))
+	assign.set("expiry_end", nullableTime(fields.ExpiryEnd))
+
+	assign.set("importer_base_name", nullableString(fields.ImporterBaseName))
+	assign.set("importer_search_key", nullableString(fields.ImporterSearchKey))
+	assign.set("legal_entity_type", nullableString(fields.LegalEntityType))
+	assign.set("overseas_establishment_search_key", nullableString(fields.OverseasEstablishmentSearchKey))
+
+	assign.set("alcohol_name_ko", nullableString(fields.AlcoholNameKO))
+	assign.set("alcohol_name_en", nullableString(fields.AlcoholNameEN))
+	assign.set("alcohol_category_ko", nullableString(fields.AlcoholCategoryKO))
+	assign.set("alcohol_category_en", nullableString(fields.AlcoholCategoryEN))
+	assign.set("alcohol_region_ko", nullableString(fields.AlcoholRegionKO))
+	assign.set("alcohol_region_en", nullableString(fields.AlcoholRegionEN))
+	assign.set("alcohol_abv", nullableString(fields.AlcoholABV))
+	assign.set("cask_candidate", nullableString(fields.CaskCandidate))
+	assign.set("distillery_name_ko_candidate", nullableString(fields.DistilleryNameKOCandidate))
+	assign.set("distillery_name_en_candidate", nullableString(fields.DistilleryNameENCandidate))
+
+	assign.set("manufacture_country_name_ko", nullableString(fields.ManufactureCountryNameKO))
+	assign.set("manufacture_country_name_en", nullableString(fields.ManufactureCountryNameEN))
+	assign.set("manufacture_country_alpha2", nullableString(fields.ManufactureCountryAlpha2))
+	assign.set("manufacture_country_alpha3", nullableString(fields.ManufactureCountryAlpha3))
+	assign.set("export_country_name_ko", nullableString(fields.ExportCountryNameKO))
+	assign.set("export_country_name_en", nullableString(fields.ExportCountryNameEN))
+	assign.set("export_country_alpha2", nullableString(fields.ExportCountryAlpha2))
+	assign.set("export_country_alpha3", nullableString(fields.ExportCountryAlpha3))
+
+	assign.set("normalization_status", status)
+	assign.set("normalization_version", nullableString(completion.NormalizationVersion))
+	assign.set("normalization_reasons", reasons)
+	assign.set("unparsed_fragments_json", fragments)
+	assign.set("normalized_at", completion.NormalizedAt)
+
+	assign.setExpression("claim_owner = NULL")
+	assign.setExpression("claim_lease_until = NULL")
+	assign.setExpression("claim_next_attempt_at = NULL")
+	assign.setExpression("claim_last_error = NULL")
+	assign.setExpression(`review_status = CASE
 		        WHEN ? = 'REVIEW_REQUIRED' THEN 'PENDING'
 		        ELSE 'NOT_REQUIRED'
-		    END
+		    END`, status)
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE declarations
+		SET `+assign.clause()+`
 		WHERE id = ? AND rcno = ? AND source_item_id = ?
 		  AND claim_owner = ? AND claim_attempts = ? AND claim_lease_until >= NOW(6)
-	`, nullableString(fields.BaseProductNameKO), nullableString(fields.BaseProductNameEN),
-		nullableString(fields.SKUDisplayNameKO), nullableString(fields.SKUDisplayNameEN),
-		nullableString(fields.NameSearchKeyKO), nullableString(fields.NameSearchKeyEN), key,
-		nullableString(fields.VolumeRaw), nullableInt(fields.VolumeML), nullableInt(fields.UnitVolumeML), nullableInt(fields.PackageCount),
-		nullableString(fields.ABVRaw), nullableFloat(fields.ABVPercent), nullableString(fields.ProofRaw), nullableFloat(fields.ProofValue), nullableString(fields.StrengthType),
-		nullableString(fields.AgeRaw), nullableInt(fields.AgeYears), nullableString(fields.VintageRaw), nullableInt(fields.VintageYear), nullableString(fields.VersionMarker),
-		nullableString(fields.EditionName), nullableString(fields.MaterialCode), nullableString(fields.CaskNumber), nullableString(fields.BatchNumber),
-		nullableString(fields.LotNumber), nullableString(fields.ManufactureNumber), nullableString(fields.ExpiryRaw), nullableTime(fields.ExpiryStart), nullableTime(fields.ExpiryEnd),
-		nullableString(fields.ImporterBaseName), nullableString(fields.ImporterSearchKey), nullableString(fields.LegalEntityType),
-		nullableString(fields.OverseasEstablishmentSearchKey),
-		nullableString(fields.AlcoholNameKO), nullableString(fields.AlcoholNameEN),
-		nullableString(fields.AlcoholCategoryKO), nullableString(fields.AlcoholCategoryEN),
-		nullableString(fields.AlcoholRegionKO), nullableString(fields.AlcoholRegionEN), nullableString(fields.AlcoholABV),
-		nullableString(fields.CaskCandidate), nullableString(fields.DistilleryNameKOCandidate), nullableString(fields.DistilleryNameENCandidate),
-		nullableString(fields.ManufactureCountryNameKO), nullableString(fields.ManufactureCountryNameEN),
-		nullableString(fields.ManufactureCountryAlpha2), nullableString(fields.ManufactureCountryAlpha3),
-		nullableString(fields.ExportCountryNameKO), nullableString(fields.ExportCountryNameEN),
-		nullableString(fields.ExportCountryAlpha2), nullableString(fields.ExportCountryAlpha3),
-		string(completion.Result.Status),
-		nullableString(completion.NormalizationVersion), reasons, fragments, completion.NormalizedAt,
-		string(completion.Result.Status), completion.Source.DeclarationID, completion.Source.RCNO,
-		completion.Source.SourceItemID, completion.Source.ClaimOwner, completion.Source.ClaimAttempt,
-	)
+	`, assign.arguments(
+		completion.Source.DeclarationID, completion.Source.RCNO, completion.Source.SourceItemID,
+		completion.Source.ClaimOwner, completion.Source.ClaimAttempt,
+	)...)
 	if err != nil {
 		return fmt.Errorf("normalization 결과 저장 실패: %w", err)
 	}
@@ -325,13 +360,14 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 // Fail releases a fenced claim for a later retry while keeping prior derived
 // values intact.
 func (s *Store) Fail(ctx context.Context, failure normalization.Failure) error {
+	// 재시도 시각도 lease와 같은 DB 시계를 쓴다. 이 값은 Claim의 NOW(6) 비교 대상이다.
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE declarations
 		SET claim_owner = NULL, claim_lease_until = NULL,
-		    claim_next_attempt_at = ?, claim_last_error = ?
+		    claim_next_attempt_at = NOW(6) + INTERVAL ? MICROSECOND, claim_last_error = ?
 		WHERE id = ? AND rcno = ? AND source_item_id = ?
 		  AND claim_owner = ? AND claim_attempts = ? AND claim_lease_until >= NOW(6)
-	`, failure.RetryAt, truncateNormalizationError(failure.LastError),
+	`, failure.RetryDelay.Microseconds(), truncateNormalizationError(failure.LastError),
 		failure.Source.DeclarationID, failure.Source.RCNO, failure.Source.SourceItemID,
 		failure.Source.ClaimOwner, failure.Source.ClaimAttempt)
 	if err != nil {

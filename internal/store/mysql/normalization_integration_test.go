@@ -223,7 +223,7 @@ func TestNormalizationStore_ClaimFencing실패재시도와강제재정제를보�
 		t.Fatalf("stale completion error=%v, want lease lost", err)
 	}
 	if err := store.Fail(context.Background(), normalization.Failure{
-		Source: retried[0], RetryAt: time.Now().Add(-time.Second), LastError: "parser failed",
+		Source: retried[0], RetryDelay: -time.Second, LastError: "parser failed",
 	}); err != nil {
 		t.Fatal(err)
 	}

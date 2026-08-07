@@ -10,8 +10,6 @@ import (
 type Status string
 
 const (
-	Version = "mfds-normalization-v1"
-
 	StatusPending        Status = "PENDING"
 	StatusStale          Status = "STALE"
 	StatusNormalized     Status = "NORMALIZED"
@@ -129,9 +127,10 @@ type Completion struct {
 }
 
 type Failure struct {
-	Source    Source
-	RetryAt   time.Time
-	LastError string
+	Source Source
+	// RetryDelay는 시각이 아니라 간격이다. 실제 재시도 시각은 store가 DB 시계로 계산한다.
+	RetryDelay time.Duration
+	LastError  string
 }
 
 type Remaining struct {

@@ -44,8 +44,10 @@ func NewService(store Store, parser Parser, opts Options) (*Service, error) {
 	if opts.RunLimit <= 0 || opts.LeaseDuration <= 0 || opts.MaxAttempts <= 0 || opts.RetryDelay <= 0 {
 		return nil, errors.New("normalization 운영 설정은 모두 0보다 커야 합니다")
 	}
+	// 규칙 버전은 규칙 패키지만 소유한다. 여기서 기본값을 채우면 실제로 돌린 규칙과
+	// 원장에 기록되는 버전이 달라질 수 있으므로 호출자가 반드시 주입하게 한다.
 	if strings.TrimSpace(opts.NormalizationVersion) == "" {
-		opts.NormalizationVersion = Version
+		return nil, errors.New("normalization 규칙 버전이 필요합니다")
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -84,7 +86,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Summary, error)
 			systemErrors = append(systemErrors, fmt.Errorf("rcno=%s parser 실패: %w", source.RCNO, parseErr))
 			if !command.DryRun {
 				if failErr := s.store.Fail(ctx, Failure{
-					Source: source, RetryAt: s.opts.Now().Add(s.opts.RetryDelay), LastError: parseErr.Error(),
+					Source: source, RetryDelay: s.opts.RetryDelay, LastError: parseErr.Error(),
 				}); failErr != nil {
 					summary.SystemFailures++
 					systemErrors = append(systemErrors, fmt.Errorf("rcno=%s 실패 상태 저장 실패: %w", source.RCNO, failErr))
@@ -98,7 +100,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Summary, error)
 			systemErrors = append(systemErrors, statusErr)
 			if !command.DryRun {
 				if failErr := s.store.Fail(ctx, Failure{
-					Source: source, RetryAt: s.opts.Now().Add(s.opts.RetryDelay), LastError: statusErr.Error(),
+					Source: source, RetryDelay: s.opts.RetryDelay, LastError: statusErr.Error(),
 				}); failErr != nil {
 					summary.SystemFailures++
 					systemErrors = append(systemErrors, fmt.Errorf("rcno=%s 실패 상태 저장 실패: %w", source.RCNO, failErr))
