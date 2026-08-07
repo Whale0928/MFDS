@@ -34,6 +34,19 @@ tasks:
       - task: api:build
       - |
         root="$(pwd)"
+        # 서비스 등록 없이 포트만 살아 있으면 포그라운드 api/web 태스크가 잡고 있는 것이다.
+        # 그대로 등록하면 API는 bind 실패로 재기동을 반복하고 web은 다른 포트로 밀리는데,
+        # 헬스체크는 기존 프로세스가 통과시켜 기동 실패를 가린다.
+        if ! launchctl list "{{.API_LABEL}}" > /dev/null 2>&1 \
+          && lsof -nP -iTCP:8787 -sTCP:LISTEN > /dev/null 2>&1; then
+          echo "127.0.0.1:8787을 다른 프로세스가 쓰고 있습니다. 포그라운드 api 태스크를 먼저 종료하세요." >&2
+          exit 1
+        fi
+        if ! launchctl list "{{.WEB_LABEL}}" > /dev/null 2>&1 \
+          && lsof -nP -iTCP:5173 -sTCP:LISTEN > /dev/null 2>&1; then
+          echo "127.0.0.1:5173을 다른 프로세스가 쓰고 있습니다. 포그라운드 web 태스크를 먼저 종료하세요." >&2
+          exit 1
+        fi
         if ! launchctl list "{{.API_LABEL}}" > /dev/null 2>&1; then
           launchctl submit -l "{{.API_LABEL}}" -o "{{.API_LOG}}" -e "{{.API_LOG}}" -- \
             /bin/sh -c "cd '$root/api' && MFDS_DEMO_DSN='$(sed -n 's/^MFDS_DEMO_DSN=//p' ../../.env.local)' ./dashboard-api"
