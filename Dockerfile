@@ -5,8 +5,6 @@
 FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 
 ARG TARGETARCH
-ARG GIT_COMMIT=unknown
-ARG BUILD_TIME=unknown
 
 WORKDIR /src
 

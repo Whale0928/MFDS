@@ -180,8 +180,6 @@ jobs:
           push: true
           provenance: false
           tags: ${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:${{ needs.gate.outputs.version }}
-          build-args: |
-            GIT_COMMIT=${{ needs.gate.outputs.tag-sha }}
           cache-from: type=registry,ref=${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:cache
           cache-to: type=registry,ref=${{ env.REGISTRY_ADDRESS }}/${{ env.IMAGE_NAME }}:cache,mode=max
 
