@@ -24,6 +24,12 @@ func TestLoader_Load_YAML고정값과환경비밀값을결합한다(t *testing.T
 	if cfg.Database.DSN != "test:test@tcp(localhost:3306)/test" {
 		t.Fatalf("database DSN was not loaded")
 	}
+	if cfg.FoodSafety.APIKey != "test-foodsafety-key" {
+		t.Fatalf("FoodSafety.APIKey was not loaded")
+	}
+	if err := cfg.FoodSafety.Validate(); err != nil {
+		t.Fatalf("FoodSafety.Validate() error = %v", err)
+	}
 }
 
 func TestConfig_Validate_DSN이비어있으면오류를반환한다(t *testing.T) {
@@ -80,12 +86,72 @@ func TestConfig_Validate_웹목록PageSize가50초과면오류를반환한다(t 
 	}
 }
 
+func TestConfig_Validate_식품안전나라키가비어있으면오류를반환한다(t *testing.T) {
+	configFile, envFile := writeTestConfig(t)
+	content, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.ReplaceAll(string(content), "FOODSAFETYKOREA_API_KEY=test-foodsafety-key\n", "")
+	if err := os.WriteFile(envFile, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := NewLoader().Load(configFile, envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.FoodSafety.Validate(); err == nil || !strings.Contains(err.Error(), "FOODSAFETYKOREA_API_KEY") {
+		t.Fatalf("FoodSafety.Validate() error = %v", err)
+	}
+}
+
+func TestConfig_Validate_식품안전나라PageSize가1000초과면오류를반환한다(t *testing.T) {
+	configFile, envFile := writeTestConfig(t)
+	content, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.ReplaceAll(string(content), "page_size: 1000", "page_size: 1001")
+	if err := os.WriteFile(configFile, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := NewLoader().Load(configFile, envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.FoodSafety.Validate(); err == nil || !strings.Contains(err.Error(), "1000 이하") {
+		t.Fatalf("FoodSafety.Validate() error = %v", err)
+	}
+}
+
+func TestConfig_Validate_식품안전나라비공식Endpoint면오류를반환한다(t *testing.T) {
+	configFile, envFile := writeTestConfig(t)
+	content, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.ReplaceAll(string(content), foodSafetyKoreaBaseURL, "https://example.com")
+	if err := os.WriteFile(configFile, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := NewLoader().Load(configFile, envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.FoodSafety.Validate(); err == nil || !strings.Contains(err.Error(), "공식 HTTPS endpoint") {
+		t.Fatalf("FoodSafety.Validate() error = %v", err)
+	}
+}
+
 // clearBoundEnv는 loader가 바인딩하는 OS 환경변수를 테스트 동안 비운다.
 // OS 값이 .env 파일보다 우선하는 설계라, 이걸 비우지 않으면 개발자 셸에
 // MYSQL_DSN이 export되어 있는지에 따라 테스트 결과가 달라진다.
 func clearBoundEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"MYSQL_DSN"} {
+	for _, key := range []string{"MYSQL_DSN", "FOODSAFETYKOREA_API_KEY"} {
 		value, ok := os.LookupEnv(key)
 		if !ok {
 			continue
@@ -113,6 +179,13 @@ web:
   list_page_size: 10
   list_workers: 2
   qps: 1
+foodsafetykorea:
+  base_url: https://openapi.foodsafetykorea.go.kr
+  page_size: 1000
+  max_pages: 500
+  max_requests_per_run: 500
+  qps: 0.5
+  request_timeout: 30s
 database:
   max_open_conns: 10
   max_idle_conns: 5
@@ -132,7 +205,7 @@ targets:
   - {name: 일반증류주, code: C0314230000000000000}
   - {name: 리큐르, code: C0314240000000000000}
 `
-	env := "MYSQL_DSN=test:test@tcp(localhost:3306)/test\n"
+	env := "MYSQL_DSN=test:test@tcp(localhost:3306)/test\nFOODSAFETYKOREA_API_KEY=test-foodsafety-key\n"
 	if err := os.WriteFile(configFile, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}

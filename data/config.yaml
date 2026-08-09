@@ -9,6 +9,14 @@ web:
   list_workers: 2
   qps: 1
 
+foodsafetykorea:
+  base_url: https://openapi.foodsafetykorea.go.kr
+  page_size: 1000
+  max_pages: 500
+  max_requests_per_run: 500
+  qps: 0.5
+  request_timeout: 30s
+
 database:
   max_open_conns: 10
   max_idle_conns: 5

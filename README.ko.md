@@ -48,6 +48,8 @@ task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
+
+task run -- collect-company-registry
 ```
 
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
@@ -74,6 +76,17 @@ MYSQL_ROOT_PASSWORD  MYSQL_DATABASE  MYSQL_USER  MYSQL_PASSWORD  MYSQL_DSN
 OS 환경 변수가 `task setup`이 생성하는 추적 제외 `.env.local`보다 우선합니다.
 Migration과 생성된 sqlc 코드는 `git.secrets`에서 관리합니다.
 
+식품안전나라 업체 원장은 별도 키를 사용합니다.
+
+```text
+FOODSAFETYKOREA_API_KEY
+```
+
+`collect-company-registry`는 C001 인허가, I0250 우수수입업소, I0470 행정처분,
+I2821 폐업정보를 직렬로 수집합니다. 요청·row 원문과 매칭 근거를 별도 raw 원장에
+추가하며 기존 `items`와 `declarations`는 수정하지 않습니다. 공식 제한에 따라
+요청당 1,000행, run당 500회로 제한합니다.
+
 ## 구조
 
 ```text
@@ -81,7 +94,9 @@ cmd/                         Cobra 명령
 internal/app/                애플리케이션 조립
 internal/config/             YAML과 DB 환경 변수 로딩
 internal/source/mfdsweb/     HTTP client와 HTML parser
+internal/source/foodsafetykorea/ 식품안전나라 JSON client
 internal/usecase/weblist/    수집과 RCNO 대조
+internal/usecase/companyregistry/ 업체 원장 수집과 이름 매칭
 internal/normalization/      순수 정제 규칙과 파서
 internal/usecase/normalization/ 정제 batch와 상태 전이
 internal/store/mysql/        원장과 정제 결과 저장

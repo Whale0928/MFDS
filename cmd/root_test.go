@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
+	"github.com/bottle-note/mfds-crawler/internal/usecase/companyregistry"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
@@ -45,7 +46,7 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
-	for _, command := range []string{"collect", "health", "migrate", "normalize"} {
+	for _, command := range []string{"collect", "collect-company-registry", "health", "migrate", "normalize"} {
 		if !strings.Contains(output.String(), command) {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
@@ -120,16 +121,24 @@ func newTestRootWithRunner(
 		OpenDatabase: func(config.DatabaseConfig) (Database, error) {
 			return database, nil
 		},
-		RunWebListJob:    runWebListJob,
-		RunNormalization: successfulNormalization,
-		Out:              output,
-		ErrOut:           output,
+		RunWebListJob:      runWebListJob,
+		RunCompanyRegistry: successfulCompanyRegistryCollection,
+		RunNormalization:   successfulNormalization,
+		Out:                output,
+		ErrOut:             output,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(filepath.Dir(filepath.Dir(configFile)))
 	return root, output
+}
+
+func successfulCompanyRegistryCollection(
+	context.Context,
+	config.Config,
+) (companyregistry.Summary, error) {
+	return companyregistry.Summary{}, nil
 }
 
 func successfulNormalization(
@@ -164,6 +173,13 @@ web:
   list_page_size: 50
   list_workers: 2
   qps: 1
+foodsafetykorea:
+  base_url: https://openapi.foodsafetykorea.go.kr
+  page_size: 1000
+  max_pages: 500
+  max_requests_per_run: 500
+  qps: 0.5
+  request_timeout: 30s
 database:
   max_open_conns: 10
   max_idle_conns: 5
@@ -183,7 +199,7 @@ targets:
   - {name: 일반증류주, code: C0314230000000000000}
   - {name: 리큐르, code: C0314240000000000000}
 `
-	env := "MYSQL_DSN=test:test@tcp(localhost:3306)/test\n"
+	env := "MYSQL_DSN=test:test@tcp(localhost:3306)/test\nFOODSAFETYKOREA_API_KEY=test-foodsafety-key\n"
 	if err := os.WriteFile(configFile, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}

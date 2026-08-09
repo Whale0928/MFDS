@@ -18,18 +18,20 @@ type Database interface {
 }
 
 type Dependencies struct {
-	Loader           *config.Loader
-	OpenDatabase     func(config.DatabaseConfig) (Database, error)
-	RunWebListJob    RunWebListJobFunc
-	RunNormalization RunNormalizationFunc
-	Out              io.Writer
-	ErrOut           io.Writer
+	Loader             *config.Loader
+	OpenDatabase       func(config.DatabaseConfig) (Database, error)
+	RunWebListJob      RunWebListJobFunc
+	RunCompanyRegistry RunCompanyRegistryCollectionFunc
+	RunNormalization   RunNormalizationFunc
+	Out                io.Writer
+	ErrOut             io.Writer
 }
 
 func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 	if deps.Loader == nil ||
 		deps.OpenDatabase == nil ||
 		deps.RunWebListJob == nil ||
+		deps.RunCompanyRegistry == nil ||
 		deps.RunNormalization == nil ||
 		deps.Out == nil ||
 		deps.ErrOut == nil {
@@ -68,6 +70,7 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 		return nil, err
 	}
 	root.AddCommand(newNormalizeCommand(getConfig, deps.RunNormalization, deps.Out))
+	root.AddCommand(newCollectCompanyRegistryCommand(getConfig, deps.RunCompanyRegistry, deps.Out))
 	return root, nil
 }
 

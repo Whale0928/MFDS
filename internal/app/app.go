@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/bottle-note/mfds-crawler/cmd"
 	"github.com/bottle-note/mfds-crawler/internal/config"
+	"github.com/bottle-note/mfds-crawler/internal/source/foodsafetykorea"
 	"github.com/bottle-note/mfds-crawler/internal/source/mfdsweb"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
+	"github.com/bottle-note/mfds-crawler/internal/usecase/companyregistry"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
 
@@ -58,6 +61,47 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 				return weblist.JobResult{}, err
 			}
 			return service.ExecuteJob(ctx, command)
+		},
+		RunCompanyRegistry: func(
+			ctx context.Context,
+			cfg config.Config,
+		) (summary companyregistry.Summary, runErr error) {
+			if err := cfg.FoodSafety.Validate(); err != nil {
+				return companyregistry.Summary{}, err
+			}
+			store, err := storemysql.Open(cfg.Database)
+			if err != nil {
+				return companyregistry.Summary{}, err
+			}
+			defer func() {
+				runErr = errors.Join(runErr, store.Close())
+			}()
+			client, err := foodsafetykorea.NewClient(foodsafetykorea.ClientOptions{
+				APIKey: cfg.FoodSafety.APIKey,
+				HTTPClient: &http.Client{
+					Timeout: cfg.FoodSafety.RequestTimeout,
+				},
+			})
+			if err != nil {
+				return companyregistry.Summary{}, err
+			}
+			service, err := companyregistry.NewService(
+				store,
+				foodsafetykorea.NewUsecaseAdapter(client),
+				companyregistry.Options{
+					PageSize:       cfg.FoodSafety.PageSize,
+					MaxPages:       cfg.FoodSafety.MaxPages,
+					MaxRequests:    cfg.FoodSafety.MaxRequests,
+					QPS:            cfg.FoodSafety.QPS,
+					MaxAttempts:    cfg.Retry.MaxAttempts,
+					RetryDelays:    cfg.Retry.Delays,
+					MatcherVersion: "importer-license-match-v1",
+				},
+			)
+			if err != nil {
+				return companyregistry.Summary{}, err
+			}
+			return service.Collect(ctx)
 		},
 		RunNormalization: runNormalization,
 		Out:              out,

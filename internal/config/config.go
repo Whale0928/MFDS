@@ -5,10 +5,21 @@ import "time"
 type Config struct {
 	Timezone      string              `mapstructure:"timezone"`
 	Web           WebConfig           `mapstructure:"web"`
+	FoodSafety    FoodSafetyConfig    `mapstructure:"foodsafetykorea"`
 	Database      DatabaseConfig      `mapstructure:"database"`
 	Retry         RetryConfig         `mapstructure:"retry"`
 	Normalization NormalizationConfig `mapstructure:"normalization"`
 	Targets       []TargetItem        `mapstructure:"targets"`
+}
+
+type FoodSafetyConfig struct {
+	BaseURL        string        `mapstructure:"base_url"`
+	APIKey         string        `mapstructure:"api_key"`
+	PageSize       int           `mapstructure:"page_size"`
+	MaxPages       int           `mapstructure:"max_pages"`
+	MaxRequests    int           `mapstructure:"max_requests_per_run"`
+	QPS            float64       `mapstructure:"qps"`
+	RequestTimeout time.Duration `mapstructure:"request_timeout"`
 }
 
 type WebConfig struct {

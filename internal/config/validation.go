@@ -14,6 +14,8 @@ var requiredTargets = map[string]string{
 	"리큐르":   "C0314240000000000000",
 }
 
+const foodSafetyKoreaBaseURL = "https://openapi.foodsafetykorea.go.kr"
+
 func (c Config) Validate() error {
 	var problems []error
 	problems = appendURLProblem(problems, "web.base_url", c.Web.BaseURL)
@@ -37,6 +39,32 @@ func (c Config) Validate() error {
 		problems = append(problems, err)
 	}
 	return errors.Join(problems...)
+}
+
+func (c FoodSafetyConfig) Validate() error {
+	var problems []error
+	problems = appendHTTPSURLProblem(problems, "foodsafetykorea.base_url", c.BaseURL)
+	if strings.TrimRight(c.BaseURL, "/") != foodSafetyKoreaBaseURL {
+		problems = append(problems, fmt.Errorf("foodsafetykorea.base_url은 공식 HTTPS endpoint %s이어야 합니다", foodSafetyKoreaBaseURL))
+	}
+	if strings.TrimSpace(c.APIKey) == "" {
+		problems = append(problems, errors.New("FOODSAFETYKOREA_API_KEY가 비어 있습니다"))
+	}
+	if c.PageSize <= 0 || c.PageSize > 1000 {
+		problems = append(problems, errors.New("식품안전나라 page size는 1 이상 1000 이하여야 합니다"))
+	}
+	if c.MaxPages <= 0 || c.MaxRequests <= 0 || c.MaxRequests > 500 || c.QPS <= 0 || c.RequestTimeout <= 0 {
+		problems = append(problems, errors.New("식품안전나라 max pages, QPS, request timeout은 0보다 크고 run당 요청 수는 500 이하여야 합니다"))
+	}
+	return errors.Join(problems...)
+}
+
+func appendHTTPSURLProblem(problems []error, name, value string) []error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return append(problems, fmt.Errorf("%s이 유효한 HTTPS URL이 아닙니다", name))
+	}
+	return problems
 }
 
 func appendURLProblem(problems []error, name, value string) []error {

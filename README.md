@@ -48,6 +48,8 @@ task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
+
+task run -- collect-company-registry
 ```
 
 `normalize` processes 100 rows by default. `--rcno` force-normalizes one row
@@ -75,6 +77,18 @@ MYSQL_ROOT_PASSWORD  MYSQL_DATABASE  MYSQL_USER  MYSQL_PASSWORD  MYSQL_DSN
 OS environment values take precedence over the ignored `.env.local` generated
 by `task setup`. Migrations and generated sqlc code live in `git.secrets`.
 
+The FoodSafetyKorea company registry uses a separate credential:
+
+```text
+FOODSAFETYKOREA_API_KEY
+```
+
+`collect-company-registry` sequentially collects C001 licenses, I0250 excellent
+importers, I0470 administrative dispositions, and I2821 closures. It appends
+request/row originals and matching evidence to separate raw ledgers without
+updating `items` or `declarations`. Official limits are enforced at 1,000 rows
+per request and 500 requests per run.
+
 ## Structure
 
 ```text
@@ -82,7 +96,9 @@ cmd/                         Cobra commands
 internal/app/                application wiring
 internal/config/             YAML and database environment loading
 internal/source/mfdsweb/     HTTP client and HTML parser
+internal/source/foodsafetykorea/ FoodSafetyKorea JSON client
 internal/usecase/weblist/    collection and RCNO reconciliation
+internal/usecase/companyregistry/ company registry collection and name matching
 internal/normalization/      pure normalization rules and parsers
 internal/usecase/normalization/ normalization batch and state transitions
 internal/store/mysql/        ledger and normalization persistence
