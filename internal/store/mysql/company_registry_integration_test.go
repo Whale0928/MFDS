@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,14 +19,21 @@ func (client integrationCompanyRegistryClient) FetchPage(
 	_ context.Context,
 	request companyregistry.PageRequest,
 ) (companyregistry.Page, error) {
-	raw := integrationCompanyRegistryRow(request.Service)
-	body := []byte(fmt.Sprintf(`{"%s":{"total_count":"1","row":[%s],"RESULT":{"MSG":"정상","CODE":"INFO-000"}}}`, request.Service, raw))
+	raws := []json.RawMessage{integrationCompanyRegistryRow(request.Service)}
+	if request.Service == companyregistry.ServiceC001 {
+		raws = append(raws, json.RawMessage(`{"PRSDNT_NM":"대표","PRMS_DT":"20200123","LCNS_NO":"L-2","INSTT_NM":"기관","BSSH_NM":"테스트 수입사","LOCP_ADDR":"주소","TELNO":"02","INDUTY_NM":"수입식품등 인터넷 구매 대행업"}`))
+	}
+	serialized := make([]string, 0, len(raws))
+	for _, raw := range raws {
+		serialized = append(serialized, string(raw))
+	}
+	body := []byte(fmt.Sprintf(`{"%s":{"total_count":"%d","row":[%s],"RESULT":{"MSG":"정상","CODE":"INFO-000"}}}`, request.Service, len(raws), strings.Join(serialized, ",")))
 	return companyregistry.Page{
 		Service: request.Service, StartIndex: request.StartIndex, EndIndex: request.EndIndex,
 		Attempt: request.Attempt, RequestPathRedacted: fmt.Sprintf("/api/REDACTED/%s/json/%d/%d", request.Service, request.StartIndex, request.EndIndex),
 		RequestFilterJSON: json.RawMessage(`{}`), HTTPStatus: 200, ContentType: "application/json",
-		ResultCode: "INFO-000", ResultMessage: "정상", TotalCount: 1,
-		Rows: []json.RawMessage{raw}, RawBody: body,
+		ResultCode: "INFO-000", ResultMessage: "정상", TotalCount: uint64(len(raws)),
+		Rows: raws, RawBody: body,
 		StartedAt: client.now, FinishedAt: client.now.Add(time.Millisecond),
 	}, nil
 }
@@ -45,14 +53,13 @@ func integrationCompanyRegistryRow(service companyregistry.ServiceID) json.RawMe
 	}
 }
 
-func TestCompanyRegistryStore_네서비스Raw와매칭근거를한실행에저장한다(t *testing.T) {
+func TestCompanyRegistryStore_네서비스Raw를한실행에저장한다(t *testing.T) {
 	store := normalizationStore(t)
-	fixture := newNormalizationFixture(t, store)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	fixture.item(t, fmt.Sprintf("REG-%d", now.UnixNano()), "registry", now, now)
+	since := now.AddDate(0, 0, -1)
 	service, err := companyregistry.NewService(store, integrationCompanyRegistryClient{now: now}, companyregistry.Options{
 		PageSize: 2, MaxPages: 2, MaxRequests: 10, QPS: 1000, MaxAttempts: 1,
-		MatcherVersion: "integration-v1",
+		Since: &since, Location: time.UTC,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -63,22 +70,18 @@ func TestCompanyRegistryStore_네서비스Raw와매칭근거를한실행에저�
 		t.Fatalf("Collect() error = %v", err)
 	}
 	t.Cleanup(func() {
-		if _, cleanupErr := store.db.Exec("DELETE FROM importer_license_match_evidence WHERE run_id = ?", summary.CollectionID); cleanupErr != nil {
-			t.Errorf("company registry evidence cleanup failed: %v", cleanupErr)
-		}
 		if _, cleanupErr := store.db.Exec("DELETE FROM company_registry_runs WHERE id = ?", summary.CollectionID); cleanupErr != nil {
 			t.Errorf("company registry cleanup failed: %v", cleanupErr)
 		}
 	})
 
-	counts := make([]int, 0, 7)
+	counts := make([]int, 0, 6)
 	for _, query := range []string{
 		"SELECT COUNT(*) FROM company_registry_fetches WHERE run_id = ?",
 		"SELECT COUNT(*) FROM c001_importer_licenses_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
 		"SELECT COUNT(*) FROM i2821_importer_closures_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
 		"SELECT COUNT(*) FROM i0250_excellent_importers_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
 		"SELECT COUNT(*) FROM i0470_administrative_dispositions_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
-		"SELECT COUNT(*) FROM importer_license_match_evidence WHERE run_id = ? AND match_status = 'EXACT_NAME'",
 		"SELECT COUNT(*) FROM company_registry_runs WHERE id = ? AND status = 'COMPLETED'",
 	} {
 		var count int
@@ -87,7 +90,7 @@ func TestCompanyRegistryStore_네서비스Raw와매칭근거를한실행에저�
 		}
 		counts = append(counts, count)
 	}
-	if fmt.Sprint(counts) != "[4 1 1 1 1 1 1]" || summary.Matches[companyregistry.MatchExactName] != 1 {
+	if fmt.Sprint(counts) != "[4 2 1 1 1 1]" {
 		t.Fatalf("counts=%v summary=%+v", counts, summary)
 	}
 	var tableCount, missingComments, enumColumns int
@@ -96,7 +99,7 @@ func TestCompanyRegistryStore_네서비스Raw와매칭근거를한실행에저�
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (
 			'company_registry_runs', 'company_registry_fetches', 'c001_importer_licenses_raw',
 			'i2821_importer_closures_raw', 'i0250_excellent_importers_raw',
-			'i0470_administrative_dispositions_raw', 'importer_license_match_evidence'
+			'i0470_administrative_dispositions_raw'
 		)
 	`).Scan(&tableCount); err != nil {
 		t.Fatal(err)
@@ -106,7 +109,7 @@ func TestCompanyRegistryStore_네서비스Raw와매칭근거를한실행에저�
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (
 			'company_registry_runs', 'company_registry_fetches', 'c001_importer_licenses_raw',
 			'i2821_importer_closures_raw', 'i0250_excellent_importers_raw',
-			'i0470_administrative_dispositions_raw', 'importer_license_match_evidence'
+			'i0470_administrative_dispositions_raw'
 		) AND (COLUMN_COMMENT IS NULL OR COLUMN_COMMENT = '')
 	`).Scan(&missingComments); err != nil {
 		t.Fatal(err)
@@ -116,12 +119,12 @@ func TestCompanyRegistryStore_네서비스Raw와매칭근거를한실행에저�
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (
 			'company_registry_runs', 'company_registry_fetches', 'c001_importer_licenses_raw',
 			'i2821_importer_closures_raw', 'i0250_excellent_importers_raw',
-			'i0470_administrative_dispositions_raw', 'importer_license_match_evidence'
+			'i0470_administrative_dispositions_raw'
 		) AND DATA_TYPE = 'enum'
 	`).Scan(&enumColumns); err != nil {
 		t.Fatal(err)
 	}
-	if tableCount != 7 || missingComments != 0 || enumColumns != 0 {
+	if tableCount != 6 || missingComments != 0 || enumColumns != 0 {
 		t.Fatalf("tables=%d missing_comments=%d enum_columns=%d", tableCount, missingComments, enumColumns)
 	}
 }

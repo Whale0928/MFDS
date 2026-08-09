@@ -126,6 +126,12 @@ func (s *Server) declaration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	detail.Groups = groups
+	officialRecords, err := s.companyRecordsByName(r.Context(), detail.ImporterName, "")
+	if err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	detail.OfficialCompanyRecords = officialRecords
 	writeJSON(w, http.StatusOK, detail)
 }
 

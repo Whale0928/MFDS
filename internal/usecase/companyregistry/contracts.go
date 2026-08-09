@@ -22,6 +22,7 @@ type PageRequest struct {
 	StartIndex int
 	EndIndex   int
 	Attempt    int
+	Filters    map[string]string
 }
 
 type Page struct {
@@ -48,54 +49,16 @@ type Client interface {
 }
 
 type Store interface {
-	StartCollection(context.Context, time.Time, json.RawMessage) (uint64, error)
+	LatestCompletedThrough(context.Context) (*time.Time, error)
+	StartCollection(context.Context, time.Time, SyncWindow, json.RawMessage) (uint64, error)
 	SavePage(context.Context, uint64, Page, error) error
-	ListLatestImporters(context.Context) ([]Importer, error)
-	ListC001Candidates(context.Context, uint64) ([]LicenseCandidate, error)
-	SaveMatchEvidence(context.Context, uint64, []MatchEvidence) error
 	CompleteCollection(context.Context, uint64, Summary, time.Time) error
 	FailCollection(context.Context, uint64, error, time.Time) error
 }
 
-type Importer struct {
-	SourceItemID uint64
-	RCNO         string
-	Name         string
-}
-
-type LicenseCandidate struct {
-	RawID        uint64
-	LicenseNo    string
-	BusinessName string
-	Address      string
-}
-
-type MatchStatus string
-
-const (
-	MatchExactName      MatchStatus = "EXACT_NAME"
-	MatchNormalizedName MatchStatus = "NORMALIZED_NAME"
-	MatchNameAndAddress MatchStatus = "NAME_AND_ADDRESS"
-	MatchConfirmedAlias MatchStatus = "CONFIRMED_ALIAS"
-	MatchAmbiguous      MatchStatus = "AMBIGUOUS"
-	MatchUnresolved     MatchStatus = "UNRESOLVED"
-	MatchManual         MatchStatus = "MANUAL"
-)
-
-type MatchEvidence struct {
-	SourceItemID     uint64
-	RCNO             string
-	ImporterName     string
-	ImporterMatchKey string
-	C001RawID        *uint64
-	LicenseNo        string
-	BusinessName     string
-	Address          string
-	Status           MatchStatus
-	CandidateCount   int
-	MatcherVersion   string
-	EvidenceJSON     json.RawMessage
-	MatchedAt        time.Time
+type SyncWindow struct {
+	Since   time.Time
+	Through time.Time
 }
 
 type ServiceSummary struct {
@@ -106,19 +69,21 @@ type ServiceSummary struct {
 
 type Summary struct {
 	CollectionID uint64
+	Since        time.Time
+	Through      time.Time
 	Services     map[ServiceID]ServiceSummary
-	Matches      map[MatchStatus]uint64
 }
 
 type Options struct {
-	PageSize       int
-	MaxPages       int
-	MaxRequests    int
-	QPS            float64
-	MaxAttempts    int
-	RetryDelays    []time.Duration
-	MatcherVersion string
-	Now            func() time.Time
+	PageSize    int
+	MaxPages    int
+	MaxRequests int
+	QPS         float64
+	MaxAttempts int
+	RetryDelays []time.Duration
+	Since       *time.Time
+	Location    *time.Location
+	Now         func() time.Time
 }
 
 type RetryableError interface {

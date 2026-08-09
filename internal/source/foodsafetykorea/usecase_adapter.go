@@ -28,7 +28,7 @@ func (a *UsecaseAdapter) FetchPage(
 		return companyregistry.Page{}, &usecaseError{kind: string(ErrorKindValidation), cause: errors.New("식품안전나라 client가 필요합니다")}
 	}
 
-	sourceRequest := PageRequest{StartIndex: request.StartIndex, EndIndex: request.EndIndex}
+	sourceRequest := PageRequest{StartIndex: request.StartIndex, EndIndex: request.EndIndex, Filters: request.Filters}
 	switch request.Service {
 	case companyregistry.ServiceC001:
 		page, err := a.client.FetchC001(ctx, sourceRequest)

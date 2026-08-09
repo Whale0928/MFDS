@@ -49,7 +49,7 @@ task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
 
-task run -- collect-company-registry
+task run -- sync-company-registry --since YYYY-MM-DD
 ```
 
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
@@ -82,10 +82,17 @@ Migration과 생성된 sqlc 코드는 `git.secrets`에서 관리합니다.
 FOODSAFETYKOREA_API_KEY
 ```
 
-`collect-company-registry`는 C001 인허가, I0250 우수수입업소, I0470 행정처분,
-I2821 폐업정보를 직렬로 수집합니다. 요청·row 원문과 매칭 근거를 별도 raw 원장에
-추가하며 기존 `items`와 `declarations`는 수정하지 않습니다. 공식 제한에 따라
-요청당 1,000행, run당 500회로 제한합니다.
+`sync-company-registry`는 수입식품 영업신고 정보(C001), 수입식품업 폐업정보
+(I2821), 우수수입업소 현황(I0250), 행정처분 결과(I0470)를 직렬로 수집합니다.
+최초 실행에는 `--since`가 필요하고, 이후에는 마지막 완료 실행의 기준일을 다시
+포함해 변경일자(`CHNG_DT`) 기준으로 증분 동기화합니다. 변경일자 필터가 없는
+우수수입업소 현황(I0250)은 매번 전체를 조회합니다. 요청·행 원문은 별도 원본(raw)
+원장에 추가하며 기존 `items`와 `declarations`는 수정하지 않습니다.
+
+업체 연결 테이블은 만들지 않습니다. 대시보드가 수입 기록 상세를 열 때 원장의
+수입사명과 공식 업소명을 그대로 비교해 현재 데이터베이스를 조회하며, 같은 이름의
+복수 인허가도 모두 보여줍니다. 공식 제한에 따라 요청당 1,000행, 동기화 실행당
+500회로 제한합니다.
 
 ## 구조
 
@@ -96,7 +103,7 @@ internal/config/             YAML과 DB 환경 변수 로딩
 internal/source/mfdsweb/     HTTP client와 HTML parser
 internal/source/foodsafetykorea/ 식품안전나라 JSON client
 internal/usecase/weblist/    수집과 RCNO 대조
-internal/usecase/companyregistry/ 업체 원장 수집과 이름 매칭
+internal/usecase/companyregistry/ 업체 공식정보 증분 수집
 internal/normalization/      순수 정제 규칙과 파서
 internal/usecase/normalization/ 정제 batch와 상태 전이
 internal/store/mysql/        원장과 정제 결과 저장

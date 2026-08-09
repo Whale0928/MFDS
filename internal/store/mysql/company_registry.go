@@ -11,30 +11,44 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bottle-note/mfds-crawler/internal/usecase/companyregistry"
 )
 
-func (s *Store) StartCollection(ctx context.Context, startedAt time.Time, configJSON json.RawMessage) (uint64, error) {
+func (s *Store) LatestCompletedThrough(ctx context.Context) (*time.Time, error) {
+	var through sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		SELECT sync_through_date
+		FROM company_registry_runs
+		WHERE status = 'COMPLETED' AND sync_through_date IS NOT NULL
+		ORDER BY id DESC
+		LIMIT 1
+	`).Scan(&through)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("최근 업체 공식정보 동기화 기준일 조회 실패: %w", err)
+	}
+	if !through.Valid {
+		return nil, nil
+	}
+	return &through.Time, nil
+}
+
+func (s *Store) StartCollection(ctx context.Context, startedAt time.Time, window companyregistry.SyncWindow, configJSON json.RawMessage) (uint64, error) {
 	runUUID, err := randomUUID()
 	if err != nil {
 		return 0, err
 	}
-	matcherVersion := "importer-license-match-v1"
-	var snapshot struct {
-		MatcherVersion string `json:"matcher_version"`
-	}
-	if json.Unmarshal(configJSON, &snapshot) == nil && snapshot.MatcherVersion != "" {
-		matcherVersion = snapshot.MatcherVersion
-	}
 	servicesJSON, _ := json.Marshal(companyregistry.Services)
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO company_registry_runs (
-			run_uuid, status, config_json, matcher_version, requested_services_json, started_at
-		) VALUES (?, 'RUNNING', ?, ?, ?, ?)
-	`, runUUID, configJSON, matcherVersion, servicesJSON, startedAt)
+			run_uuid, status, config_json, requested_services_json,
+			change_since_date, sync_through_date, started_at
+		) VALUES (?, 'RUNNING', ?, ?, ?, ?, ?)
+	`, runUUID, configJSON, servicesJSON, window.Since, window.Through, startedAt)
 	if err != nil {
 		return 0, fmt.Errorf("업체 등록정보 수집 실행 생성 실패: %w", err)
 	}
@@ -163,11 +177,11 @@ func insertCompanyRegistryRawRow(
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO c001_importer_licenses_raw (
 				fetch_id, row_no, president_name, permit_date_raw, license_no, institution_name,
-				business_name, business_name_search_key, location_address, telephone_no, industry_name,
+				business_name, location_address, telephone_no, industry_name,
 				raw_payload_json, raw_payload_sha256, observed_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, fetchID, rowNo, nullString(row.PresidentName), nullString(row.PermitDate), nullString(row.LicenseNo),
-			nullString(row.InstitutionName), nullString(row.BusinessName), nullString(companyRegistryNameKey(row.BusinessName)),
+			nullString(row.InstitutionName), nullString(row.BusinessName),
 			nullString(row.Address), nullString(row.TelephoneNo), nullString(row.IndustryName), raw, hash[:], observedAt)
 		return wrapRawInsertError(service, rowNo, err)
 	case companyregistry.ServiceI2821:
@@ -226,91 +240,13 @@ func insertCompanyRegistryRawRow(
 	}
 }
 
-func (s *Store) ListLatestImporters(ctx context.Context) ([]companyregistry.Importer, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT latest.id, latest.rcno, latest.importer_name
-		FROM (
-			SELECT i.id, i.rcno, i.importer_name,
-			       ROW_NUMBER() OVER (PARTITION BY i.rcno ORDER BY i.observed_at DESC, i.id DESC) AS rn
-			FROM items AS i
-			WHERE i.importer_name IS NOT NULL AND TRIM(i.importer_name) <> ''
-		) AS latest
-		WHERE latest.rn = 1
-		ORDER BY latest.id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("최신 수입업체 원장 조회 실패: %w", err)
-	}
-	defer rows.Close()
-	var result []companyregistry.Importer
-	for rows.Next() {
-		var importer companyregistry.Importer
-		if err := rows.Scan(&importer.SourceItemID, &importer.RCNO, &importer.Name); err != nil {
-			return nil, fmt.Errorf("최신 수입업체 원장 scan 실패: %w", err)
-		}
-		result = append(result, importer)
-	}
-	return result, rows.Err()
-}
-
-func (s *Store) ListC001Candidates(ctx context.Context, runID uint64) ([]companyregistry.LicenseCandidate, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT r.id, COALESCE(r.license_no, ''), COALESCE(r.business_name, ''), COALESCE(r.location_address, '')
-		FROM c001_importer_licenses_raw AS r
-		JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-		WHERE f.run_id = ?
-		ORDER BY r.id
-	`, runID)
-	if err != nil {
-		return nil, fmt.Errorf("C001 업체 후보 조회 실패: %w", err)
-	}
-	defer rows.Close()
-	var result []companyregistry.LicenseCandidate
-	for rows.Next() {
-		var candidate companyregistry.LicenseCandidate
-		if err := rows.Scan(&candidate.RawID, &candidate.LicenseNo, &candidate.BusinessName, &candidate.Address); err != nil {
-			return nil, fmt.Errorf("C001 업체 후보 scan 실패: %w", err)
-		}
-		result = append(result, candidate)
-	}
-	return result, rows.Err()
-}
-
-func (s *Store) SaveMatchEvidence(ctx context.Context, runID uint64, evidence []companyregistry.MatchEvidence) error {
-	return s.withTx(ctx, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO importer_license_match_evidence (
-				run_id, source_item_id, source_rcno, source_importer_name, source_importer_name_key,
-				selected_c001_raw_id, selected_license_no, selected_business_name, selected_location_address,
-				match_status, evidence_json, matcher_version, candidate_count, matched_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`)
-		if err != nil {
-			return fmt.Errorf("수입업체 매칭 근거 statement 준비 실패: %w", err)
-		}
-		defer stmt.Close()
-		for _, item := range evidence {
-			if _, err := stmt.ExecContext(ctx, runID, item.SourceItemID, item.RCNO, item.ImporterName,
-				item.ImporterMatchKey, item.C001RawID, nullString(item.LicenseNo), nullString(item.BusinessName),
-				nullString(item.Address), item.Status, item.EvidenceJSON, item.MatcherVersion,
-				item.CandidateCount, item.MatchedAt); err != nil {
-				return fmt.Errorf("수입업체 매칭 근거 저장 실패: source_item_id=%d: %w", item.SourceItemID, err)
-			}
-		}
-		return nil
-	})
-}
-
 func (s *Store) CompleteCollection(ctx context.Context, runID uint64, summary companyregistry.Summary, finishedAt time.Time) error {
-	matched := summary.Matches[companyregistry.MatchExactName] + summary.Matches[companyregistry.MatchNormalizedName] +
-		summary.Matches[companyregistry.MatchNameAndAddress] + summary.Matches[companyregistry.MatchConfirmedAlias] +
-		summary.Matches[companyregistry.MatchManual]
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE company_registry_runs
 		SET status = 'COMPLETED', completed_services = total_services,
-		    matched_count = ?, ambiguous_count = ?, unresolved_count = ?, finished_at = ?
+		    finished_at = ?
 		WHERE id = ? AND status = 'RUNNING'
-	`, matched, summary.Matches[companyregistry.MatchAmbiguous], summary.Matches[companyregistry.MatchUnresolved], finishedAt, runID)
+	`, finishedAt, runID)
 	if err != nil {
 		return fmt.Errorf("업체 등록정보 수집 완료 갱신 실패: %w", err)
 	}
@@ -405,11 +341,6 @@ func randomUUID() (string, error) {
 	value[8] = value[8]&0x3f | 0x80
 	encoded := hex.EncodeToString(value)
 	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:], nil
-}
-
-func companyRegistryNameKey(value string) string {
-	value = strings.ToLower(strings.Join(strings.Fields(value), " "))
-	return strings.NewReplacer("㈜", "", "(주)", "", "주식회사", "", "유한회사", "", " ", "", "(", "", ")", "").Replace(value)
 }
 
 func companyRegistryErrorKind(err error) string {

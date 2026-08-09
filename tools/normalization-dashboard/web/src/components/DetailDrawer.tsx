@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { reasonLabel } from '../format'
 import { Hint, Term } from './Hint'
 import { StatusChip } from './StatusChip'
+import { OfficialRecords } from './OfficialRecords'
 import type { Declaration, DetailGroup } from '../types'
 
 export function DetailDrawer({ declaration, onClose }: { declaration: Declaration | null; onClose: () => void }) {
@@ -12,6 +13,7 @@ export function DetailDrawer({ declaration, onClose }: { declaration: Declaratio
   const fragments = (declaration.evidence ?? []).filter((row) => typeof row !== 'string' && row.label === '미해석 값')
   const ledger = groups.filter((group) => group.side === 'ledger')
   const normalized = groups.filter((group) => group.side !== 'ledger')
+  const officialRecords = declaration.official_company_records ?? []
   return <div className="drawer-layer" role="presentation" onMouseDown={onClose}>
     <aside className="drawer" role="dialog" aria-modal="true" aria-label="신고 건 상세" onMouseDown={(event) => event.stopPropagation()}>
       <div className="drawer__head">
@@ -40,7 +42,7 @@ export function DetailDrawer({ declaration, onClose }: { declaration: Declaratio
       </div>
 
       {groups.length ? <div className="drawer__columns">
-        <DetailColumn title="원장" caption="식약처에서 수집한 그대로" groups={ledger} emptyShown={emptyShown} />
+      <DetailColumn title="원장" caption="식약처에서 수집한 그대로" groups={ledger} emptyShown={emptyShown} officialRecords={officialRecords} />
         <DetailColumn title="정제 결과" caption="원장에서 갈라내 정리한 값" groups={normalized} emptyShown={emptyShown} />
       </div> : <p className="empty-inline">표시할 값을 불러오지 못했습니다.</p>}
     </aside>
@@ -48,7 +50,7 @@ export function DetailDrawer({ declaration, onClose }: { declaration: Declaratio
 }
 
 // 원장과 정제를 나란히 두되 서로 다른 위치를 볼 수 있도록 열마다 따로 스크롤한다.
-function DetailColumn({ title, caption, groups, emptyShown }: { title: string; caption: string; groups: DetailGroup[]; emptyShown: boolean }) {
+function DetailColumn({ title, caption, groups, emptyShown, officialRecords = [] }: { title: string; caption: string; groups: DetailGroup[]; emptyShown: boolean; officialRecords?: NonNullable<Declaration['official_company_records']> }) {
   return <section className="drawer__column" aria-label={title}>
     <header className="drawer__column-head"><h3>{title}</h3><p>{caption}</p></header>
     {groups.map((group) => {
@@ -64,5 +66,6 @@ function DetailColumn({ title, caption, groups, emptyShown }: { title: string; c
         </dl>
       </div>
     })}
+    {title === '원장' && <div className="field-group official-records-group"><h4>수입업체 공식정보</h4><p className="official-records-group__note">수입사 이름으로 현재 데이터베이스를 즉석 조회한 결과</p><OfficialRecords records={officialRecords} /></div>}
   </section>
 }

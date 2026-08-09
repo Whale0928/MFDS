@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,33 +20,26 @@ func (f fakeClient) FetchPage(_ context.Context, request PageRequest) (Page, err
 type memoryStore struct {
 	pages      []Page
 	pageErrors []error
-	importers  []Importer
-	candidates []LicenseCandidate
-	evidence   []MatchEvidence
+	latest     *time.Time
+	window     SyncWindow
+	started    bool
 	completed  bool
 	failed     bool
 }
 
-func (s *memoryStore) StartCollection(context.Context, time.Time, json.RawMessage) (uint64, error) {
+func (s *memoryStore) LatestCompletedThrough(context.Context) (*time.Time, error) {
+	return s.latest, nil
+}
+
+func (s *memoryStore) StartCollection(_ context.Context, _ time.Time, window SyncWindow, _ json.RawMessage) (uint64, error) {
+	s.started = true
+	s.window = window
 	return 41, nil
 }
 
 func (s *memoryStore) SavePage(_ context.Context, _ uint64, page Page, err error) error {
 	s.pages = append(s.pages, page)
 	s.pageErrors = append(s.pageErrors, err)
-	return nil
-}
-
-func (s *memoryStore) ListLatestImporters(context.Context) ([]Importer, error) {
-	return s.importers, nil
-}
-
-func (s *memoryStore) ListC001Candidates(context.Context, uint64) ([]LicenseCandidate, error) {
-	return s.candidates, nil
-}
-
-func (s *memoryStore) SaveMatchEvidence(_ context.Context, _ uint64, evidence []MatchEvidence) error {
-	s.evidence = append(s.evidence, evidence...)
 	return nil
 }
 
@@ -64,12 +58,11 @@ type temporaryError struct{}
 func (temporaryError) Error() string   { return "temporary" }
 func (temporaryError) Retryable() bool { return true }
 
-func TestCollect_네서비스정상응답_원문페이지와매칭근거를저장한다(t *testing.T) {
-	store := &memoryStore{
-		importers:  []Importer{{SourceItemID: 7, RCNO: "R1", Name: "주식회사 회사A"}},
-		candidates: []LicenseCandidate{{RawID: 9, LicenseNo: "L1", BusinessName: "회사A"}},
-	}
+func TestCollect_네서비스정상응답_변경일자필터와원문페이지를저장한다(t *testing.T) {
+	store := &memoryStore{}
+	filters := map[ServiceID]map[string]string{}
 	client := fakeClient{fetch: func(request PageRequest) (Page, error) {
+		filters[request.Service] = request.Filters
 		return Page{
 			Service: request.Service, StartIndex: request.StartIndex, EndIndex: request.EndIndex,
 			ResultCode: "INFO-000", TotalCount: 1, Rows: []json.RawMessage{json.RawMessage(`{"LCNS_NO":"L1"}`)},
@@ -85,11 +78,14 @@ func TestCollect_네서비스정상응답_원문페이지와매칭근거를저�
 	if !store.completed || store.failed || len(store.pages) != 4 {
 		t.Fatalf("completed=%t failed=%t pages=%d", store.completed, store.failed, len(store.pages))
 	}
-	if len(store.evidence) != 1 || store.evidence[0].Status != MatchNormalizedName {
-		t.Fatalf("evidence = %+v", store.evidence)
+	if filters[ServiceC001]["CHNG_DT"] != "20260801" || filters[ServiceI2821]["CHNG_DT"] != "20260801" || filters[ServiceI0470]["CHNG_DT"] != "20260801" {
+		t.Fatalf("filters = %+v", filters)
 	}
-	if summary.Matches[MatchNormalizedName] != 1 {
-		t.Fatalf("matches = %+v", summary.Matches)
+	if len(filters[ServiceI0250]) != 0 {
+		t.Fatalf("I0250 filters = %+v", filters[ServiceI0250])
+	}
+	if summary.Since.Format("2006-01-02") != "2026-08-01" || summary.Through.Format("2006-01-02") != "2026-08-09" {
+		t.Fatalf("summary window = %s~%s", summary.Since, summary.Through)
 	}
 }
 
@@ -137,26 +133,29 @@ func TestCollect_Retryable오류후성공_실패응답과재시도를모두기�
 	}
 }
 
-func TestCollect_동일정규화명에복수인허가_자동확정하지않는다(t *testing.T) {
-	store := &memoryStore{
-		importers: []Importer{{SourceItemID: 1, RCNO: "R1", Name: "(주)회사A"}},
-		candidates: []LicenseCandidate{
-			{RawID: 1, LicenseNo: "L1", BusinessName: "회사A"},
-			{RawID: 2, LicenseNo: "L2", BusinessName: "주식회사 회사A"},
-		},
-	}
-	client := fakeClient{fetch: func(PageRequest) (Page, error) {
-		return Page{ResultCode: "INFO-200"}, nil
-	}}
-	service := newTestService(t, store, client, 10)
+func TestCollect_Since생략하고완료이력없음_실행을시작하지않는다(t *testing.T) {
+	store := &memoryStore{}
+	service := newTestService(t, store, fakeClient{fetch: func(PageRequest) (Page, error) { return Page{}, nil }}, 10)
+	service.opts.Since = nil
 
 	_, err := service.Collect(context.Background())
 
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || store.started || !strings.Contains(err.Error(), "--since") {
+		t.Fatalf("error=%v started=%t", err, store.started)
 	}
-	if len(store.evidence) != 1 || store.evidence[0].Status != MatchAmbiguous || store.evidence[0].C001RawID != nil {
-		t.Fatalf("evidence = %+v", store.evidence)
+}
+
+func TestCollect_Since생략하고완료이력있음_마지막성공일을다시포함한다(t *testing.T) {
+	latest := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
+	store := &memoryStore{latest: &latest}
+	client := fakeClient{fetch: func(PageRequest) (Page, error) { return Page{ResultCode: "INFO-200"}, nil }}
+	service := newTestService(t, store, client, 10)
+	service.opts.Since = nil
+
+	_, err := service.Collect(context.Background())
+
+	if err != nil || store.window.Since.Format("2006-01-02") != "2026-08-07" {
+		t.Fatalf("error=%v window=%+v", err, store.window)
 	}
 }
 
@@ -196,7 +195,12 @@ func newTestService(t *testing.T, store Store, client Client, pageSize int) *Ser
 	now := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
 	service, err := NewService(store, client, Options{
 		PageSize: pageSize, MaxPages: 5, MaxRequests: 100, QPS: 1, MaxAttempts: 3,
-		RetryDelays: []time.Duration{0}, MatcherVersion: "test-v1",
+		RetryDelays: []time.Duration{0},
+		Since: func() *time.Time {
+			value := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+			return &value
+		}(),
+		Location: time.UTC,
 		Now: func() time.Time {
 			now = now.Add(2 * time.Second)
 			return now

@@ -5,12 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 )
-
-const defaultMatcherVersion = "importer-license-match-v1"
 
 type Service struct {
 	store         Store
@@ -31,37 +27,39 @@ func NewService(store Store, client Client, opts Options) (*Service, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	if opts.MatcherVersion == "" {
-		opts.MatcherVersion = defaultMatcherVersion
+	if opts.Location == nil {
+		opts.Location = time.UTC
 	}
 	return &Service{store: store, client: client, opts: opts}, nil
 }
 
 func (s *Service) Collect(ctx context.Context) (Summary, error) {
 	startedAt := s.opts.Now()
+	window, err := s.syncWindow(ctx, startedAt)
+	if err != nil {
+		return Summary{}, err
+	}
 	configJSON, err := json.Marshal(map[string]any{
 		"services": Services, "page_size": s.opts.PageSize, "max_pages": s.opts.MaxPages,
 		"max_requests_per_run": s.opts.MaxRequests,
 		"qps":                  s.opts.QPS, "max_attempts": s.opts.MaxAttempts,
-		"matcher_version": s.opts.MatcherVersion,
+		"change_since_date": window.Since.Format("2006-01-02"),
+		"sync_through_date": window.Through.Format("2006-01-02"),
 	})
 	if err != nil {
 		return Summary{}, fmt.Errorf("업체 원장 설정 snapshot 생성 실패: %w", err)
 	}
-	runID, err := s.store.StartCollection(ctx, startedAt, configJSON)
+	runID, err := s.store.StartCollection(ctx, startedAt, window, configJSON)
 	if err != nil {
 		return Summary{}, err
 	}
-	summary := Summary{CollectionID: runID, Services: make(map[ServiceID]ServiceSummary), Matches: make(map[MatchStatus]uint64)}
+	summary := Summary{CollectionID: runID, Since: window.Since, Through: window.Through, Services: make(map[ServiceID]ServiceSummary)}
 	for _, serviceID := range Services {
-		serviceSummary, collectErr := s.collectService(ctx, runID, serviceID)
+		serviceSummary, collectErr := s.collectService(ctx, runID, serviceID, window.Since)
 		if collectErr != nil {
 			return Summary{}, s.failCollection(ctx, runID, collectErr)
 		}
 		summary.Services[serviceID] = serviceSummary
-	}
-	if err := s.matchImporters(ctx, runID, &summary); err != nil {
-		return Summary{}, s.failCollection(ctx, runID, err)
 	}
 	if err := s.store.CompleteCollection(ctx, runID, summary, s.opts.Now()); err != nil {
 		return Summary{}, err
@@ -69,10 +67,38 @@ func (s *Service) Collect(ctx context.Context) (Summary, error) {
 	return summary, nil
 }
 
-func (s *Service) collectService(ctx context.Context, runID uint64, serviceID ServiceID) (ServiceSummary, error) {
+func (s *Service) syncWindow(ctx context.Context, now time.Time) (SyncWindow, error) {
+	through := dateInLocation(now, s.opts.Location)
+	since := s.opts.Since
+	if since == nil {
+		latest, err := s.store.LatestCompletedThrough(ctx)
+		if err != nil {
+			return SyncWindow{}, err
+		}
+		if latest == nil {
+			return SyncWindow{}, errors.New("첫 업체 공식정보 동기화에는 --since YYYY-MM-DD가 필요합니다")
+		}
+		since = latest
+	}
+	from := dateInLocation(*since, s.opts.Location)
+	if from.After(through) {
+		return SyncWindow{}, fmt.Errorf("변경일자 %s는 동기화 기준일 %s 이후일 수 없습니다", from.Format("2006-01-02"), through.Format("2006-01-02"))
+	}
+	return SyncWindow{Since: from, Through: through}, nil
+}
+
+func dateInLocation(value time.Time, location *time.Location) time.Time {
+	localized := value.In(location)
+	return time.Date(localized.Year(), localized.Month(), localized.Day(), 0, 0, 0, 0, location)
+}
+
+func (s *Service) collectService(ctx context.Context, runID uint64, serviceID ServiceID, since time.Time) (ServiceSummary, error) {
 	summary := ServiceSummary{}
 	for pageNo := 1; pageNo <= s.opts.MaxPages; pageNo++ {
 		request := PageRequest{Service: serviceID, StartIndex: (pageNo-1)*s.opts.PageSize + 1, EndIndex: pageNo * s.opts.PageSize}
+		if serviceID != ServiceI0250 {
+			request.Filters = map[string]string{"CHNG_DT": since.Format("20060102")}
+		}
 		page, err := s.fetchWithRetry(ctx, runID, request)
 		if err != nil {
 			return ServiceSummary{}, fmt.Errorf("%s %d페이지 수집 실패: %w", serviceID, pageNo, err)
@@ -132,93 +158,6 @@ func (s *Service) waitForRateLimit(ctx context.Context) error {
 	}
 	s.nextRequestAt = now.Add(time.Duration(float64(time.Second) / s.opts.QPS))
 	return nil
-}
-
-func (s *Service) matchImporters(ctx context.Context, runID uint64, summary *Summary) error {
-	importers, err := s.store.ListLatestImporters(ctx)
-	if err != nil {
-		return err
-	}
-	candidates, err := s.store.ListC001Candidates(ctx, runID)
-	if err != nil {
-		return err
-	}
-	exact, normalized := candidateIndexes(candidates)
-	evidence := make([]MatchEvidence, 0, len(importers))
-	for _, importer := range importers {
-		match := evaluateImporter(importer, exact, normalized, s.opts.MatcherVersion, s.opts.Now())
-		evidence = append(evidence, match)
-		summary.Matches[match.Status]++
-	}
-	return s.store.SaveMatchEvidence(ctx, runID, evidence)
-}
-
-func candidateIndexes(candidates []LicenseCandidate) (map[string][]LicenseCandidate, map[string][]LicenseCandidate) {
-	exact := make(map[string][]LicenseCandidate)
-	normalized := make(map[string][]LicenseCandidate)
-	for _, candidate := range candidates {
-		exact[rawNameKey(candidate.BusinessName)] = append(exact[rawNameKey(candidate.BusinessName)], candidate)
-		normalized[companyNameKey(candidate.BusinessName)] = append(normalized[companyNameKey(candidate.BusinessName)], candidate)
-	}
-	return exact, normalized
-}
-
-func evaluateImporter(importer Importer, exact, normalized map[string][]LicenseCandidate, version string, now time.Time) MatchEvidence {
-	candidates := uniqueCandidates(exact[rawNameKey(importer.Name)])
-	status := MatchExactName
-	if len(candidates) == 0 {
-		candidates = uniqueCandidates(normalized[companyNameKey(importer.Name)])
-		status = MatchNormalizedName
-	}
-	if len(candidates) == 0 {
-		status = MatchUnresolved
-	} else if len(candidates) > 1 {
-		status = MatchAmbiguous
-	}
-	payload := map[string]any{"candidate_raw_ids": candidateIDs(candidates), "source_name": importer.Name}
-	evidenceJSON, _ := json.Marshal(payload)
-	result := MatchEvidence{
-		SourceItemID: importer.SourceItemID, RCNO: importer.RCNO, ImporterName: importer.Name,
-		ImporterMatchKey: companyNameKey(importer.Name), Status: status, CandidateCount: len(candidates),
-		MatcherVersion: version, EvidenceJSON: evidenceJSON, MatchedAt: now,
-	}
-	if len(candidates) == 1 {
-		candidate := candidates[0]
-		result.C001RawID = &candidate.RawID
-		result.LicenseNo = candidate.LicenseNo
-		result.BusinessName = candidate.BusinessName
-		result.Address = candidate.Address
-	}
-	return result
-}
-
-func uniqueCandidates(values []LicenseCandidate) []LicenseCandidate {
-	seen := make(map[uint64]LicenseCandidate, len(values))
-	for _, value := range values {
-		seen[value.RawID] = value
-	}
-	result := make([]LicenseCandidate, 0, len(seen))
-	for _, value := range seen {
-		result = append(result, value)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].RawID < result[j].RawID })
-	return result
-}
-
-func candidateIDs(values []LicenseCandidate) []uint64 {
-	ids := make([]uint64, 0, len(values))
-	for _, value := range values {
-		ids = append(ids, value.RawID)
-	}
-	return ids
-}
-
-func rawNameKey(value string) string { return strings.Join(strings.Fields(value), " ") }
-
-func companyNameKey(value string) string {
-	value = strings.ToLower(rawNameKey(value))
-	replacer := strings.NewReplacer("㈜", "", "(주)", "", "주식회사", "", "유한회사", "", " ", "", "(", "", ")", "")
-	return replacer.Replace(value)
 }
 
 func retryDelay(delays []time.Duration, attempt int) time.Duration {

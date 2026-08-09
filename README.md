@@ -49,7 +49,7 @@ task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
 
-task run -- collect-company-registry
+task run -- sync-company-registry --since YYYY-MM-DD
 ```
 
 `normalize` processes 100 rows by default. `--rcno` force-normalizes one row
@@ -83,11 +83,18 @@ The FoodSafetyKorea company registry uses a separate credential:
 FOODSAFETYKOREA_API_KEY
 ```
 
-`collect-company-registry` sequentially collects C001 licenses, I0250 excellent
-importers, I0470 administrative dispositions, and I2821 closures. It appends
-request/row originals and matching evidence to separate raw ledgers without
-updating `items` or `declarations`. Official limits are enforced at 1,000 rows
-per request and 500 requests per run.
+`sync-company-registry` sequentially collects importer business licenses (C001),
+importer closures (I2821), excellent importers (I0250), and administrative
+dispositions (I0470). The first run requires `--since`; later runs reuse the
+last completed date as an inclusive `CHNG_DT` boundary. Excellent importers
+(I0250) has no change-date filter and is fetched in full each time. Request and
+row originals are appended to separate raw ledgers without changing `items` or
+`declarations`.
+
+No persistent importer-link table is created. When an import detail is opened,
+the dashboard queries the current database by exact importer/business name and
+returns every license with that name. Official limits remain 1,000 rows per
+request and 500 requests per synchronization run.
 
 ## Structure
 
@@ -98,7 +105,7 @@ internal/config/             YAML and database environment loading
 internal/source/mfdsweb/     HTTP client and HTML parser
 internal/source/foodsafetykorea/ FoodSafetyKorea JSON client
 internal/usecase/weblist/    collection and RCNO reconciliation
-internal/usecase/companyregistry/ company registry collection and name matching
+internal/usecase/companyregistry/ incremental company registry collection
 internal/normalization/      pure normalization rules and parsers
 internal/usecase/normalization/ normalization batch and state transitions
 internal/store/mysql/        ledger and normalization persistence

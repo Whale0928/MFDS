@@ -65,13 +65,26 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 		RunCompanyRegistry: func(
 			ctx context.Context,
 			cfg config.Config,
+			command cmd.CompanyRegistrySyncCommand,
 		) (summary companyregistry.Summary, runErr error) {
 			if err := cfg.FoodSafety.Validate(); err != nil {
 				return companyregistry.Summary{}, err
 			}
+			location, err := time.LoadLocation(cfg.Timezone)
+			if err != nil {
+				return companyregistry.Summary{}, fmt.Errorf("timezone 읽기 실패: %w", err)
+			}
 			store, err := storemysql.Open(cfg.Database)
 			if err != nil {
 				return companyregistry.Summary{}, err
+			}
+			var since *time.Time
+			if command.Since != "" {
+				parsed, parseErr := time.ParseInLocation("2006-01-02", command.Since, location)
+				if parseErr != nil {
+					return companyregistry.Summary{}, fmt.Errorf("--since는 YYYY-MM-DD 형식이어야 합니다: %w", parseErr)
+				}
+				since = &parsed
 			}
 			defer func() {
 				runErr = errors.Join(runErr, store.Close())
@@ -89,13 +102,14 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 				store,
 				foodsafetykorea.NewUsecaseAdapter(client),
 				companyregistry.Options{
-					PageSize:       cfg.FoodSafety.PageSize,
-					MaxPages:       cfg.FoodSafety.MaxPages,
-					MaxRequests:    cfg.FoodSafety.MaxRequests,
-					QPS:            cfg.FoodSafety.QPS,
-					MaxAttempts:    cfg.Retry.MaxAttempts,
-					RetryDelays:    cfg.Retry.Delays,
-					MatcherVersion: "importer-license-match-v1",
+					PageSize:    cfg.FoodSafety.PageSize,
+					MaxPages:    cfg.FoodSafety.MaxPages,
+					MaxRequests: cfg.FoodSafety.MaxRequests,
+					QPS:         cfg.FoodSafety.QPS,
+					MaxAttempts: cfg.Retry.MaxAttempts,
+					RetryDelays: cfg.Retry.Delays,
+					Since:       since,
+					Location:    location,
 				},
 			)
 			if err != nil {

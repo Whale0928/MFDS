@@ -70,7 +70,7 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 		return nil, err
 	}
 	root.AddCommand(newNormalizeCommand(getConfig, deps.RunNormalization, deps.Out))
-	root.AddCommand(newCollectCompanyRegistryCommand(getConfig, deps.RunCompanyRegistry, deps.Out))
+	root.AddCommand(newSyncCompanyRegistryCommand(getConfig, deps.RunCompanyRegistry, deps.Out))
 	return root, nil
 }
 

@@ -46,7 +46,7 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
-	for _, command := range []string{"collect", "collect-company-registry", "health", "migrate", "normalize"} {
+	for _, command := range []string{"collect", "sync-company-registry", "health", "migrate", "normalize"} {
 		if !strings.Contains(output.String(), command) {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
@@ -137,6 +137,7 @@ func newTestRootWithRunner(
 func successfulCompanyRegistryCollection(
 	context.Context,
 	config.Config,
+	CompanyRegistrySyncCommand,
 ) (companyregistry.Summary, error) {
 	return companyregistry.Summary{}, nil
 }
