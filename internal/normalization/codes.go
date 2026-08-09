@@ -11,10 +11,10 @@ var (
 	lotSuffixPattern   = regexp.MustCompile(`(?i)(?:^|[\s)])(L[0-9][A-Z0-9]{4,})\s*$`)
 	parenMaterial      = regexp.MustCompile(`\((\d{6})\)`)
 	// A code behind a slash identifies the importer material or the single cask, so it is kept whole as an SKU axis.
-	slashMaterial = regexp.MustCompile(`(?i)/\s*([A-Z0-9]{5,})\b`)
-	caskPattern        = regexp.MustCompile(`#\s*(\d+)\b`)
-	batchENPattern     = regexp.MustCompile(`(?i)\bBATCH\s*#?\s*([A-Z0-9-]+)\b`)
-	batchKOPattern     = regexp.MustCompile(`배치\s*#?\s*([A-Z0-9-]+)\b`)
+	slashMaterial  = regexp.MustCompile(`(?i)/\s*([A-Z0-9]{5,})\b`)
+	caskPattern    = regexp.MustCompile(`#\s*(\d+)\b`)
+	batchENPattern = regexp.MustCompile(`(?i)\bBATCH\s*#?\s*([A-Z0-9-]+)\b`)
+	batchKOPattern = regexp.MustCompile(`배치\s*#?\s*([A-Z0-9-]+)\b`)
 )
 
 func parseCodes(ko, en string, state *derivationState) {
@@ -64,6 +64,7 @@ func parseLabeledCode(source string, state *derivationState) {
 		state.add(ReasonLotSuffixCodeExcludedFromSKU)
 	}
 }
+
 // parseUnlabeledLot separates an unlabeled L code that sits in a bracket or behind a separator. Section 5.5 keeps such a
 // code out of the SKU key, and it must never be split, so the whole token is taken or nothing is.
 func parseUnlabeledLot(ko, en string, state *derivationState) {

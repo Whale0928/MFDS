@@ -11,10 +11,10 @@ var (
 	compositionPattern = regexp.MustCompile(`인삼|송이|향|과즙|농축|원액|함유`)
 	// RE2 has no lookahead, so the closing parenthesis is captured in group 2 and restored by every replacement.
 	strongABVPattern = regexp.MustCompile(`(?i)(?:ALC\.?\s*|)(\d+(?:\.\d+)?)\s*%\s*(?:VOL\.?\b|(\))|$)`)
-	koABVPattern       = regexp.MustCompile(`(?:주도\s*)?(\d+(?:\.\d+)?)\s*(?:%|도)\s*$|\((\d+(?:\.\d+)?)\s*%\)`)
-	percentPattern     = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
-	proofPattern       = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:PROOF|프루프)`)
-	strengthPattern    = regexp.MustCompile(`(?i)\b(?:(?:CASK|BARREL|FULL)\s+STRENGTH|OVERPROOF)\b`)
+	koABVPattern     = regexp.MustCompile(`(?:주도\s*)?(\d+(?:\.\d+)?)\s*(?:%|도)\s*$|\((\d+(?:\.\d+)?)\s*%\)`)
+	percentPattern   = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
+	proofPattern     = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:PROOF|프루프)`)
+	strengthPattern  = regexp.MustCompile(`(?i)\b(?:(?:CASK|BARREL|FULL)\s+STRENGTH|OVERPROOF)\b`)
 )
 
 func parseABV(ko, en string, state *derivationState) {

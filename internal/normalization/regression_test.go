@@ -53,13 +53,13 @@ func TestNormalize_결함2_다중괄호_각괄호를개별처리한다(t *testin
 	// 규칙문서 5.1절: 한 괄호 안에 값이 섞여 있으므로 내부 토큰 단위로 파싱한다 (line 126-132)
 	// 규칙문서 5.1절: 괄호 전체를 일괄 제거하지 않는다 (line 112)
 	tests := []struct {
-		name           string
-		input          Input
-		wantVol        *int
-		wantABV        *float64
-		wantLot        string
-		wantAge        *int
-		wantKO         string
+		name    string
+		input   Input
+		wantVol *int
+		wantABV *float64
+		wantLot string
+		wantAge *int
+		wantKO  string
 	}{
 		{
 			name:    "용량_ABV_LOT 괄호",
@@ -78,9 +78,9 @@ func TestNormalize_결함2_다중괄호_각괄호를개별처리한다(t *testin
 			wantKO:  "벤로막 15년 700ml 43%",
 		},
 		{
-			name:    "중첩괄호_성분설명_보존",
-			input:   Input{ProductNameKO: "푸쉬킨 너츠 & 누가 (천연향료(누가향1.03%,헤일즐넛향0.02%)함유)"},
-			wantKO:  "푸쉬킨 너츠 & 누가 (천연향료(누가향1.03%,헤일즐넛향0.02%)함유)",
+			name:   "중첩괄호_성분설명_보존",
+			input:  Input{ProductNameKO: "푸쉬킨 너츠 & 누가 (천연향료(누가향1.03%,헤일즐넛향0.02%)함유)"},
+			wantKO: "푸쉬킨 너츠 & 누가 (천연향료(누가향1.03%,헤일즐넛향0.02%)함유)",
 		},
 	}
 
@@ -247,9 +247,9 @@ func TestNormalize_필수회귀확장_추출값과이름을함께검증한다(t 
 	// 규칙문서 10장 필수 회귀 사례 (line 737-758)
 	// 기존 테스트가 추출값만 보고 이름 보존을 검증하지 않은 구멍을 메운다
 	tests := []struct {
-		name       string
-		input      Input
-		check      func(*testing.T, Result)
+		name  string
+		input Input
+		check func(*testing.T, Result)
 	}{
 		{
 			name:  "천단위_용량_BaseName검증",
@@ -302,8 +302,8 @@ func TestNormalize_필수회귀확장_추출값과이름을함께검증한다(t 
 				if result.ABVPercent != nil {
 					t.Errorf("ABVPercent must be nil, got %v", result.ABVPercent)
 				}
-			if result.BaseProductNameEN != "KILCHOMAN 100% ISLAY" {
-				t.Errorf("BaseProductNameEN = %q, want 'KILCHOMAN 100%% ISLAY'", result.BaseProductNameEN)
+				if result.BaseProductNameEN != "KILCHOMAN 100% ISLAY" {
+					t.Errorf("BaseProductNameEN = %q, want 'KILCHOMAN 100%% ISLAY'", result.BaseProductNameEN)
 				}
 			},
 		},
@@ -465,8 +465,8 @@ func TestNormalize_불변식_영숫자코드토큰이중간에서잘리지않는
 	// 규칙문서 5.5절: SMWS NNNNNNGX... 는 단일 캐스크 제품 식별 코드로 유지 (line 282)
 	// 규칙문서 4절: #는 캐스크 번호, 배치 번호로 구분 정보 포함 (line 84)
 	type codeCase struct {
-		input      Input
-		fullCodes  []string // code fragments that must appear fully or not at all
+		input     Input
+		fullCodes []string // code fragments that must appear fully or not at all
 	}
 	cases := []codeCase{
 		{
@@ -635,5 +635,5 @@ func findAlnumTokens(value string) []string {
 	return tokens
 }
 
-func intPtr(v int) *int         { return &v }
+func intPtr(v int) *int           { return &v }
 func floatPtr(v float64) *float64 { return &v }
