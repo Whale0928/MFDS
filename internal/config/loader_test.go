@@ -80,8 +80,30 @@ func TestConfig_Validate_웹목록PageSize가50초과면오류를반환한다(t 
 	}
 }
 
+// clearBoundEnv는 loader가 바인딩하는 OS 환경변수를 테스트 동안 비운다.
+// OS 값이 .env 파일보다 우선하는 설계라, 이걸 비우지 않으면 개발자 셸에
+// MYSQL_DSN이 export되어 있는지에 따라 테스트 결과가 달라진다.
+func clearBoundEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"MYSQL_DSN"} {
+		value, ok := os.LookupEnv(key)
+		if !ok {
+			continue
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.Setenv(key, value); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func writeTestConfig(t *testing.T) (string, string) {
 	t.Helper()
+	clearBoundEnv(t)
 	dir := t.TempDir()
 	configFile := filepath.Join(dir, "config.yaml")
 	envFile := filepath.Join(dir, ".env")
