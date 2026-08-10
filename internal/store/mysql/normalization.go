@@ -307,6 +307,7 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	assign.set("importer_base_name", nullableString(fields.ImporterBaseName))
 	assign.set("importer_search_key", nullableString(fields.ImporterSearchKey))
 	assign.set("legal_entity_type", nullableString(fields.LegalEntityType))
+	assign.set("manufacturer_name", nullableString(fields.ManufacturerName))
 	assign.set("overseas_establishment_search_key", nullableString(fields.OverseasEstablishmentSearchKey))
 
 	assign.set("alcohol_name_ko", nullableString(fields.AlcoholNameKO))

@@ -99,6 +99,7 @@ func (parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
 			ImporterBaseName:               result.ImporterBaseName,
 			ImporterSearchKey:              result.ImporterSearchKey,
 			LegalEntityType:                result.LegalEntityType,
+			ManufacturerName:               result.ManufacturerName,
 			OverseasEstablishmentSearchKey: result.OverseasEstablishmentSearchKey,
 			AlcoholNameKO:                  result.AlcoholNameKO,
 			AlcoholNameEN:                  result.AlcoholNameEN,

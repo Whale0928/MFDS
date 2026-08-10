@@ -51,5 +51,6 @@ func parseCompany(importer, overseas string, state *derivationState) {
 		state.result.ImporterBaseName = trimmed
 		state.result.ImporterSearchKey = searchKey(trimmed)
 	}
+	state.result.ManufacturerName = overseas
 	state.result.OverseasEstablishmentSearchKey = searchKey(overseas)
 }

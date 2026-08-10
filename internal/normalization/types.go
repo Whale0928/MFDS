@@ -105,6 +105,7 @@ type Result struct {
 
 	ImporterBaseName, ImporterSearchKey string
 	LegalEntityType                     string
+	ManufacturerName                    string
 	OverseasEstablishmentSearchKey      string
 
 	AlcoholNameKO, AlcoholNameEN         string

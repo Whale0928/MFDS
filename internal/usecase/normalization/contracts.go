@@ -81,6 +81,7 @@ type Fields struct {
 	ImporterBaseName               string
 	ImporterSearchKey              string
 	LegalEntityType                string
+	ManufacturerName               string
 	OverseasEstablishmentSearchKey string
 	AlcoholNameKO                  string
 	AlcoholNameEN                  string

@@ -69,7 +69,7 @@ func deriveAlcoholCandidate(input Input, state *derivationState) {
 }
 
 func matchDistillery(_, _ string) *distilleryMatch {
-	// TODO: 추후 distilleries 사전 테이블을 조회해 제품명과 증류소를 매칭합니다.
+	// TODO: distilleries 기준 데이터의 조회·점수화가 연결되면 제품명에서 후보를 계산합니다.
 	return nil
 }
 
