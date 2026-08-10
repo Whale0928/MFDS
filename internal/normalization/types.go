@@ -4,7 +4,7 @@ package normalization
 import "time"
 
 // Version identifies this deterministic rule set in the derived declaration row.
-const Version = "mfds-normalization-v2"
+const Version = "mfds-normalization-v3"
 
 const (
 	StatusNormalized     Status = "NORMALIZED"
@@ -40,8 +40,11 @@ const (
 	ReasonMaterialCodePreservedForSKU              Reason = "MATERIAL_CODE_PRESERVED_FOR_SKU"
 	ReasonCaskNumberPreservedForSKU                Reason = "CASK_NUMBER_PRESERVED_FOR_SKU"
 	ReasonHashNumberAmbiguous                      Reason = "HASH_NUMBER_AMBIGUOUS"
-	ReasonBatchLanguageMismatch                    Reason = "BATCH_LANGUAGE_MISMATCH"
-	ReasonEditionLanguageMismatch                  Reason = "EDITION_TOKEN_LANGUAGE_MISMATCH"
+	ReasonVariantMarkerAmbiguous                   Reason = "VARIANT_MARKER_AMBIGUOUS"
+	ReasonStrengthAbbreviationAmbiguous            Reason = "STRENGTH_ABBREVIATION_AMBIGUOUS"
+	ReasonBatchLanguageMismatch                    Reason = "BATCH_VALUE_CONFLICT"
+	ReasonEditionLanguageMismatch                  Reason = "EDITION_VALUE_CONFLICT"
+	ReasonIngredientPercentMultiple                Reason = "INGREDIENT_PERCENT_MULTIPLE_VALUES"
 	ReasonKOVersionMarker                          Reason = "KO_VERSION_MARKER_WITHOUT_ENGLISH_MAPPING"
 	ReasonParenthesisSemanticText                  Reason = "PARENTHESIS_SEMANTIC_TEXT"
 	ReasonGenericProductName                       Reason = "GENERIC_PRODUCT_NAME_REVIEW_REQUIRED"
@@ -50,6 +53,15 @@ const (
 	ReasonExportCountryNotMapped                   Reason = "EXPORT_COUNTRY_NOT_MAPPED"
 	ReasonCaskTypeCandidateExtracted               Reason = "CASK_TYPE_CANDIDATE_EXTRACTED"
 	ReasonOverseasEstablishmentDistilleryCandidate Reason = "OVERSEAS_ESTABLISHMENT_DISTILLERY_CANDIDATE"
+)
+
+const (
+	VariantMarkerTypeCaskNumber           = "CASK_NUMBER"
+	VariantMarkerTypeBatchNumber          = "BATCH_NUMBER"
+	VariantMarkerTypeEditionNumber        = "EDITION_NUMBER"
+	VariantMarkerTypeSeriesNumber         = "SERIES_NUMBER"
+	VariantMarkerTypeStrengthAbbreviation = "STRENGTH_ABBREVIATION"
+	VariantMarkerTypeUnknown              = "UNKNOWN"
 )
 
 // Input contains parsed source values. It intentionally excludes raw HTML and hashes because this package never rewrites them.
@@ -76,11 +88,15 @@ type Result struct {
 	VolumeRaw, ABVRaw, ProofRaw, StrengthType string
 	VolumeML, UnitVolumeML, PackageCount      *int
 	ABVPercent, ProofValue                    *float64
+	IngredientPercentRaw                      string
+	IngredientPercent                         *float64
 	AgeRaw                                    string
 	AgeYears                                  *int
 	VintageRaw                                string
 	VintageYear                               *int
 	VersionMarker, EditionName                string
+	VariantMarkerRaw, VariantMarkerType       string
+	VariantMarkerValue                        string
 	MaterialCode, CaskNumber, BatchNumber     string
 	LotNumber, ManufactureNumber              string
 

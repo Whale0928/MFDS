@@ -56,6 +56,8 @@ type Fields struct {
 	PackageCount                   *int
 	ABVRaw                         string
 	ABVPercent                     *float64
+	IngredientPercentRaw           string
+	IngredientPercent              *float64
 	ProofRaw                       string
 	ProofValue                     *float64
 	StrengthType                   string
@@ -65,6 +67,9 @@ type Fields struct {
 	VintageYear                    *int
 	VersionMarker                  string
 	EditionName                    string
+	VariantMarkerRaw               string
+	VariantMarkerType              string
+	VariantMarkerValue             string
 	MaterialCode                   string
 	CaskNumber                     string
 	BatchNumber                    string

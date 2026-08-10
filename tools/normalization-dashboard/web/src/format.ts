@@ -15,10 +15,15 @@ const reasonLabels: Record<string, string> = {
   AGE_CONFLICT_BETWEEN_LANGUAGES: '한글과 영문의 숙성연수가 다름',
   AGE_EXTRACTED: '숙성연수를 추출함',
   BATCH_LANGUAGE_MISMATCH: '한글과 영문의 배치 번호가 다름',
+  BATCH_VALUE_CONFLICT: '한글과 영문의 배치 번호가 다름',
   CASK_NUMBER_PRESERVED_FOR_SKU: '캐스크 번호를 제품 구분값으로 보존함',
   EDITION_TOKEN_LANGUAGE_MISMATCH: '한글과 영문의 에디션 표기가 다름',
+  EDITION_VALUE_CONFLICT: '한글과 영문의 에디션 번호가 다름',
   GENERIC_PRODUCT_NAME_REVIEW_REQUIRED: '제품명이 너무 일반적이라 추가 확인 필요',
   HASH_NUMBER_AMBIGUOUS: '# 뒤 숫자의 의미가 모호함',
+  VARIANT_MARKER_AMBIGUOUS: '제품 변형 마커의 의미가 모호함',
+  STRENGTH_ABBREVIATION_AMBIGUOUS: 'CS 약어의 캐스크 스트렝스 근거가 부족함',
+  INGREDIENT_PERCENT_MULTIPLE_VALUES: '성분 비율이 여러 개라 숫자를 확정하지 않음',
   KO_VERSION_MARKER_WITHOUT_ENGLISH_MAPPING: '한글 버전 표기에 대응하는 영문 표기가 없음',
   LOT_LABELED_EXCLUDED_FROM_SKU: 'LOT 표기는 제품 구분값에서 제외함',
   LOT_SUFFIX_CODE_EXCLUDED_FROM_SKU: '품명 끝 LOT 코드는 제품 구분값에서 제외함',
@@ -46,11 +51,13 @@ export function reasonLabel(code: string) {
 
 const fieldLabels: Record<string, string> = {
   abv: '알코올 도수',
+  ingredient_percent: '성분 비율',
   age: '숙성 연수',
   importer: '수입사 이름',
   normalized_name: '정제된 제품 이름',
   vintage: '빈티지 연도',
   volume: '용량',
+  variant_marker: '제품 변형 마커',
 }
 
 export function fieldLabel(field: string) {

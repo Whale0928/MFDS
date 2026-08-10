@@ -1,7 +1,7 @@
 package dashboard
 
 // detailColumn은 상세 화면에 노출하는 값 하나를 정의한다.
-// Expr은 declaration_details View에서 읽을 SQL 표현식이고 Hint는 화면 각주로 그대로 쓴다.
+// Expr은 원장 View와 declarations의 v3 컬럼에서 읽을 SQL 표현식이고 Hint는 화면 각주로 그대로 쓴다.
 type detailColumn struct {
 	Group string
 	Expr  string
@@ -51,6 +51,8 @@ var detailColumns = []detailColumn{
 	{"용량과 도수", "COALESCE(CAST(package_count AS CHAR), '')", "포장 수량", "한 신고 건에 묶인 병 개수입니다. 6병 세트면 6입니다."},
 	{"용량과 도수", "COALESCE(abv_raw, '')", "도수 원문", "제품명 안에서 알코올 도수로 판단한 글자 그대로입니다."},
 	{"용량과 도수", "COALESCE(CAST(abv_percent AS CHAR), '')", "알코올 도수 (%)", "전체 부피 대비 알코올 비율입니다. 40이면 40도입니다."},
+	{"용량과 도수", "COALESCE(declaration_v3.ingredient_percent_raw, '')", "성분 비율 원문", "성분 함량으로 판단한 퍼센트 표기를 원문 그대로 보존한 값입니다."},
+	{"용량과 도수", "COALESCE(CAST(declaration_v3.ingredient_percent AS CHAR), '')", "성분 비율 (%)", "한 가지 성분 비율만 명확할 때 구조화한 값입니다. 여러 값이면 원문만 보존합니다."},
 	{"용량과 도수", "COALESCE(proof_raw, '')", "프루프 원문", "미국식 도수 표기(proof)를 발견한 그대로입니다."},
 	{"용량과 도수", "COALESCE(CAST(proof_value AS CHAR), '')", "프루프 값", "미국식 도수 단위입니다. 도수의 두 배가 프루프입니다. 80 프루프는 40도입니다."},
 	{"용량과 도수", "COALESCE(strength_type, '')", "도수 유형", "캐스크 스트렝스처럼 도수와 관련된 제품 특성 표기입니다."},
@@ -61,6 +63,9 @@ var detailColumns = []detailColumn{
 	{"제품 특성", "COALESCE(CAST(vintage_year AS CHAR), '')", "빈티지 연도", "원액을 만든 해입니다. 숙성 연수와 다른 개념입니다."},
 	{"제품 특성", "COALESCE(edition_name, '')", "에디션", "한정판이나 특별판 이름입니다."},
 	{"제품 특성", "COALESCE(version_marker, '')", "버전 표기", "같은 제품의 몇 번째 출시인지 나타내는 표기입니다."},
+	{"제품 특성", "COALESCE(declaration_v3.variant_marker_raw, '')", "변형 마커 원문", "#, @, No. 또는 CS처럼 제품 변형을 나타낼 수 있는 표기를 원문 그대로 보존합니다."},
+	{"제품 특성", "COALESCE(declaration_v3.variant_marker_type, '')", "변형 마커 유형", "캐스크, 배치, 에디션, 시리즈 또는 미확정 문맥으로 분류한 값입니다."},
+	{"제품 특성", "COALESCE(declaration_v3.variant_marker_value, '')", "변형 마커 값", "변형 마커에서 분리한 번호나 약어입니다."},
 	{"제품 특성", "COALESCE(cask_number, '')", "캐스크 번호", "숙성에 쓴 통의 개별 번호입니다. 이 번호가 다르면 다른 병입입니다."},
 	{"제품 특성", "COALESCE(cask_candidate, '')", "캐스크 종류 후보", "셰리, 버번처럼 숙성통 종류로 보이는 표기입니다. 확정이 아니라 후보입니다."},
 
@@ -76,8 +81,8 @@ var detailColumns = []detailColumn{
 	{"수입사와 제조사", "COALESCE(importer_search_key, '')", "수입사 검색용 이름", "같은 수입사를 찾기 위한 비교 전용 형태입니다."},
 	{"수입사와 제조사", "COALESCE(legal_entity_type, '')", "법인 형태", "주식회사, 유한회사처럼 원문에서 떼어낸 법인 표기입니다."},
 	{"수입사와 제조사", "COALESCE(overseas_establishment_search_key, '')", "해외 제조업소 검색용 이름", "해외 제조업소를 비교하기 위한 전용 형태입니다."},
-	{"수입사와 제조사", "COALESCE(distillery_name_ko_candidate, '')", "증류소 후보 (한글)", "제조업소명에서 증류소로 보이는 이름을 뽑은 후보입니다. 확정이 아닙니다."},
-	{"수입사와 제조사", "COALESCE(distillery_name_en_candidate, '')", "증류소 후보 (영문)", "영문 기준 증류소 후보입니다."},
+	{"수입사와 제조사", "COALESCE(distillery_name_ko_candidate, '')", "증류소 후보 (한글)", "제품명과 향후 증류소 사전을 대조해 확인할 후보입니다. 현재는 자동 생성하지 않습니다."},
+	{"수입사와 제조사", "COALESCE(distillery_name_en_candidate, '')", "증류소 후보 (영문)", "제품명과 향후 증류소 사전을 대조해 확인할 영문 후보입니다. 현재는 자동 생성하지 않습니다."},
 
 	{"주류 분류", "COALESCE(alcohol_name_ko, '')", "주종 이름 (한글)", "위스키, 브랜디처럼 술의 종류를 가리키는 이름입니다."},
 	{"주류 분류", "COALESCE(alcohol_name_en, '')", "주종 이름 (영문)", "영문 기준 주종 이름입니다."},

@@ -48,7 +48,9 @@ func (s *Server) declarations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, declarationListResponse{Declarations: items, Page: page, PageSize: pageSize, Total: total, TotalPages: pages(total, pageSize)})
 }
 
-const declarationListSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, source_product_name_en, ''), COALESCE(sku_display_name_ko, sku_display_name_en, ''), COALESCE(base_product_name_ko, base_product_name_en, ''), COALESCE(CONCAT(unit_volume_ml, ' mL'), ''), CONCAT_WS(' · ', NULLIF(CONCAT(age_years, '년'), '년'), NULLIF(CAST(vintage_year AS CHAR), ''), NULLIF(CONCAT(abv_percent, '%'), '%'), NULLIF(CONCAT(proof_value, ' proof'), ' proof'), NULLIF(strength_type, ''), NULLIF(version_marker, ''), NULLIF(edition_name, ''), NULLIF(material_code, ''), NULLIF(cask_number, ''), NULLIF(batch_number, '')), normalization_status, COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), CAST(normalization_reasons AS CHAR) FROM declaration_details`
+const declarationV3SourceSQL = `declaration_details JOIN (SELECT id AS declaration_id, ingredient_percent_raw, ingredient_percent, variant_marker_raw, variant_marker_type, variant_marker_value FROM declarations) AS declaration_v3 ON declaration_v3.declaration_id = declaration_details.id`
+
+const declarationListSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, source_product_name_en, ''), COALESCE(sku_display_name_ko, sku_display_name_en, ''), COALESCE(base_product_name_ko, base_product_name_en, ''), COALESCE(CONCAT(unit_volume_ml, ' mL'), ''), CONCAT_WS(' · ', NULLIF(CONCAT(age_years, '년'), '년'), NULLIF(CAST(vintage_year AS CHAR), ''), NULLIF(CONCAT(abv_percent, '%'), '%'), NULLIF(CONCAT(proof_value, ' proof'), ' proof'), NULLIF(strength_type, ''), NULLIF(version_marker, ''), NULLIF(edition_name, ''), NULLIF(declaration_v3.variant_marker_raw, ''), NULLIF(declaration_v3.variant_marker_type, ''), NULLIF(material_code, ''), NULLIF(cask_number, ''), NULLIF(batch_number, '')), normalization_status, COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), CAST(normalization_reasons AS CHAR) FROM ` + declarationV3SourceSQL
 
 func (f declarationFilter) where() (string, []any) {
 	clauses, args := []string{}, []any{}
@@ -112,14 +114,14 @@ func (s *Server) declaration(w http.ResponseWriter, r *http.Request) {
 	}
 	var detail declarationDetail
 	var reasons, fragments string
-	var volumeRaw, volume, abvRaw, abv, ageRaw, age, vintageRaw, vintage, edition, lot, batch, importer, establishment string
-	if err := rows.Scan(&detail.RCNO, &detail.SourceName, &detail.SourceNameEnglish, &detail.NormalizedName, &detail.NormalizedNameEnglish, &detail.Status, &reasons, &fragments, &detail.ProcessedAt, &detail.ItemName, &detail.ImporterName, &detail.Country, &volumeRaw, &volume, &abvRaw, &abv, &ageRaw, &age, &vintageRaw, &vintage, &edition, &lot, &batch, &importer, &establishment); err != nil {
+	var volumeRaw, volume, abvRaw, abv, ingredientRaw, ingredient, ageRaw, age, vintageRaw, vintage, edition, variantRaw, variantType, variantValue, lot, batch, importer, establishment string
+	if err := rows.Scan(&detail.RCNO, &detail.SourceName, &detail.SourceNameEnglish, &detail.NormalizedName, &detail.NormalizedNameEnglish, &detail.Status, &reasons, &fragments, &detail.ProcessedAt, &detail.ItemName, &detail.ImporterName, &detail.Country, &volumeRaw, &volume, &abvRaw, &abv, &ingredientRaw, &ingredient, &ageRaw, &age, &vintageRaw, &vintage, &edition, &variantRaw, &variantType, &variantValue, &lot, &batch, &importer, &establishment); err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
 	detail.ReasonCodes = jsonList(reasons)
-	detail.Evidence = normalizationEvidence(detail.ReasonCodes, jsonList(fragments), []evidenceItem{{Label: "용량", RawValue: volumeRaw, NormalizedValue: volume}, {Label: "도수", RawValue: abvRaw, NormalizedValue: abv}, {Label: "숙성", RawValue: ageRaw, NormalizedValue: age}, {Label: "빈티지", RawValue: vintageRaw, NormalizedValue: vintage}})
-	detail.Fields = map[string]string{"volume": volume, "abv": abv, "age": age, "vintage": vintage, "edition": edition, "lot": lot, "batch": batch, "importer_base_name": importer, "overseas_establishment": establishment}
+	detail.Evidence = normalizationEvidence(detail.ReasonCodes, jsonList(fragments), []evidenceItem{{Label: "용량", RawValue: volumeRaw, NormalizedValue: volume}, {Label: "도수", RawValue: abvRaw, NormalizedValue: abv}, {Label: "성분 비율", RawValue: ingredientRaw, NormalizedValue: ingredient}, {Label: "숙성", RawValue: ageRaw, NormalizedValue: age}, {Label: "빈티지", RawValue: vintageRaw, NormalizedValue: vintage}, {Label: "변형 마커", RawValue: variantRaw, NormalizedValue: strings.TrimSpace(variantType + " " + variantValue)}})
+	detail.Fields = map[string]string{"volume": volume, "abv": abv, "ingredient_percent": ingredient, "age": age, "vintage": vintage, "edition": edition, "variant_marker_raw": variantRaw, "variant_marker_type": variantType, "variant_marker_value": variantValue, "lot": lot, "batch": batch, "importer_base_name": importer, "overseas_establishment": establishment}
 	groups, err := s.detailGroups(r, rcno)
 	if err != nil {
 		writeDatabaseError(w, err)
@@ -135,7 +137,7 @@ func (s *Server) detailGroups(r *http.Request, rcno string) ([]detailGroup, erro
 	for index, column := range detailColumns {
 		expressions[index] = column.Expr
 	}
-	rows, err := s.queryer.QueryContext(r.Context(), "SELECT "+strings.Join(expressions, ", ")+" FROM declaration_details WHERE rcno = ? LIMIT 1", rcno)
+	rows, err := s.queryer.QueryContext(r.Context(), "SELECT "+strings.Join(expressions, ", ")+" FROM "+declarationV3SourceSQL+" WHERE rcno = ? LIMIT 1", rcno)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +167,7 @@ func (s *Server) detailGroups(r *http.Request, rcno string) ([]detailGroup, erro
 	return groups, rows.Err()
 }
 
-const declarationDetailSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, ''), COALESCE(source_product_name_en, ''), COALESCE(sku_display_name_ko, base_product_name_ko, ''), COALESCE(sku_display_name_en, base_product_name_en, ''), normalization_status, CAST(normalization_reasons AS CHAR), CAST(unparsed_fragments_json AS CHAR), COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), COALESCE(volume_raw, ''), COALESCE(CONCAT(volume_ml, ' mL'), ''), COALESCE(abv_raw, ''), COALESCE(CONCAT(abv_percent, '%'), ''), COALESCE(age_raw, ''), COALESCE(CONCAT(age_years, ' years'), ''), COALESCE(vintage_raw, ''), COALESCE(CAST(vintage_year AS CHAR), ''), COALESCE(edition_name, version_marker, ''), COALESCE(lot_number, ''), COALESCE(batch_number, ''), COALESCE(importer_base_name, ''), COALESCE(overseas_establishment_search_key, '') FROM declaration_details WHERE rcno = ? LIMIT 1`
+const declarationDetailSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, ''), COALESCE(source_product_name_en, ''), COALESCE(sku_display_name_ko, base_product_name_ko, ''), COALESCE(sku_display_name_en, base_product_name_en, ''), normalization_status, CAST(normalization_reasons AS CHAR), CAST(unparsed_fragments_json AS CHAR), COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), COALESCE(volume_raw, ''), COALESCE(CONCAT(volume_ml, ' mL'), ''), COALESCE(abv_raw, ''), COALESCE(CONCAT(abv_percent, '%'), ''), COALESCE(declaration_v3.ingredient_percent_raw, ''), COALESCE(CONCAT(declaration_v3.ingredient_percent, '%'), ''), COALESCE(age_raw, ''), COALESCE(CONCAT(age_years, ' years'), ''), COALESCE(vintage_raw, ''), COALESCE(CAST(vintage_year AS CHAR), ''), COALESCE(edition_name, version_marker, ''), COALESCE(declaration_v3.variant_marker_raw, ''), COALESCE(declaration_v3.variant_marker_type, ''), COALESCE(declaration_v3.variant_marker_value, ''), COALESCE(lot_number, ''), COALESCE(batch_number, ''), COALESCE(importer_base_name, ''), COALESCE(overseas_establishment_search_key, '') FROM ` + declarationV3SourceSQL + ` WHERE rcno = ? LIMIT 1`
 
 func normalizationEvidence(reasons, fragments []string, fields []evidenceItem) []evidenceItem {
 	evidence := make([]evidenceItem, 0, len(reasons)+len(fragments)+len(fields))

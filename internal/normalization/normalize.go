@@ -7,18 +7,20 @@ func Normalize(input Input) Result {
 	result := Result{SKUDisplayNameKO: input.ProductNameKO, SKUDisplayNameEN: input.ProductNameEN, ExpiryRaw: input.ExpiryText, Reasons: []Reason{}, UnparsedFragments: []string{}}
 	state := derivationState{result: &result}
 	volume := parseVolume(input.ProductNameKO, input.ProductNameEN, &state)
+	parseIngredientPercent(input.ProductNameKO, input.ProductNameEN, &state)
 	parseABV(input.ProductNameKO, input.ProductNameEN, &state)
-	parseProofAndStrength(input.ProductNameKO+" "+input.ProductNameEN, &state)
 	parseAge(input.ProductNameKO, input.ProductNameEN, &state)
 	parseCodes(input.ProductNameKO, input.ProductNameEN, &state)
+	parseProofAndStrength(input.ProductNameKO, input.ProductNameEN, &state)
 	parseEditionAndVersion(input.ProductNameKO, input.ProductNameEN, &state)
 	parseVintage(input.ProductNameKO, input.ProductNameEN, &state)
 	parseExpiry(input.ExpiryText, &state)
 	parseCompany(input.ImporterName, input.OverseasEstablishmentName, &state)
 	result.SKUDisplayNameKO = displayName(input.ProductNameKO, volume, result.ABVPercent)
 	result.SKUDisplayNameEN = displayName(input.ProductNameEN, volume, result.ABVPercent)
-	result.BaseProductNameKO = baseName(result.SKUDisplayNameKO)
-	result.BaseProductNameEN = baseName(result.SKUDisplayNameEN)
+	confirmedVariant := confirmedNameVariant(result)
+	result.BaseProductNameKO = baseName(result.SKUDisplayNameKO, result.ABVPercent, confirmedVariant)
+	result.BaseProductNameEN = baseName(result.SKUDisplayNameEN, result.ABVPercent, confirmedVariant)
 	result.NameSearchKeyKO = searchKey(result.BaseProductNameKO)
 	result.NameSearchKeyEN = searchKey(result.BaseProductNameEN)
 	if strings.TrimSpace(input.ProductNameEN) != "" {
@@ -44,6 +46,15 @@ func Normalize(input Input) Result {
 		result.Status = StatusNormalized
 	}
 	return result
+}
+
+func confirmedNameVariant(result Result) string {
+	switch result.VariantMarkerType {
+	case VariantMarkerTypeCaskNumber, VariantMarkerTypeBatchNumber, VariantMarkerTypeEditionNumber:
+		return result.VariantMarkerRaw
+	default:
+		return ""
+	}
 }
 
 func hasSourceName(input Input) bool {

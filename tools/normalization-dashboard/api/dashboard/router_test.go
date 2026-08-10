@@ -133,7 +133,7 @@ func TestDeclarations_supportsQAndReasonFilter(t *testing.T) {
 
 func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
 	queryer := &fakeQueryer{respond: func(query string, _ []any) (RowIterator, error) {
-		if !strings.Contains(query, "FROM declaration_details WHERE rcno") {
+		if !strings.Contains(query, "FROM declaration_details") || !strings.Contains(query, "WHERE rcno") {
 			return nil, fmt.Errorf("unexpected query")
 		}
 		if strings.Contains(query, "alcohol_category_ko") {
@@ -143,7 +143,7 @@ func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
 			}
 			return &fakeRows{values: [][]any{row}}, nil
 		}
-		return &fakeRows{values: [][]any{{"202600000001", "원본", "source", "정제", "normalized", "REVIEW_REQUIRED", `["AMBIGUOUS"]`, `["700ml? "]`, "2026-08-01", "위스키", "수입사", "영국", "700ml", "700 mL", "40", "40%", "12", "12 years", "", "", "한정", "LOT-1", "B-2", "수입사", "증류소"}}}, nil
+		return &fakeRows{values: [][]any{{"202600000001", "원본", "source", "정제", "normalized", "REVIEW_REQUIRED", `["AMBIGUOUS"]`, `["700ml? "]`, "2026-08-01", "위스키", "수입사", "영국", "700ml", "700 mL", "40", "40%", "", "", "12", "12 years", "", "", "한정", "#7", "UNKNOWN", "7", "LOT-1", "B-2", "수입사", "증류소"}}}, nil
 	}}
 	request := httptest.NewRequest(http.MethodGet, "/api/declarations/202600000001", nil)
 	response := httptest.NewRecorder()
@@ -245,6 +245,23 @@ func TestQualityAndKeyContracts(t *testing.T) {
 	for _, expected := range []string{`"month":"2026-08"`, `"field_coverage":{"abv":50}`, `"status_distribution":{"NORMALIZED":3}`, `"code":"AMBIGUOUS"`, `"name":"상품"`, `"duplicate_observations"`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing %s in %s", expected, text)
+		}
+	}
+}
+
+func TestDashboardV3Queries_기존View를교체하지않고BaseTable컬럼을조회한다(t *testing.T) {
+	for name, query := range map[string]string{
+		"list":     declarationListSQL,
+		"detail":   declarationDetailSQL,
+		"coverage": coverageSQL,
+	} {
+		if !strings.Contains(query, declarationV3SourceSQL) {
+			t.Fatalf("%s query does not join declarations v3 columns: %s", name, query)
+		}
+	}
+	for _, column := range []string{"ingredient_percent_raw", "ingredient_percent", "variant_marker_raw", "variant_marker_type", "variant_marker_value"} {
+		if !strings.Contains(declarationV3SourceSQL, column) {
+			t.Fatalf("v3 source does not select %s: %s", column, declarationV3SourceSQL)
 		}
 	}
 }

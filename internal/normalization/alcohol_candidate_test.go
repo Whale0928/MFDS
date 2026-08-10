@@ -28,7 +28,7 @@ func TestCountryCatalog_현재MFDS국가를ISO코드와함께제공한다(t *tes
 	}
 }
 
-func TestNormalize_BottleNoteAlcohol후보필드를근거값으로교정한다(t *testing.T) {
+func TestNormalize_BottleNoteAlcohol필드_근거값만정제한다(t *testing.T) {
 	result := Normalize(Input{
 		ProductNameKO:             "맥캘란 12년 쉐리 캐스크 700ml (40%)",
 		ProductNameEN:             "MACALLAN 12 YEARS SHERRY CASK 700ML 40%",
@@ -51,10 +51,10 @@ func TestNormalize_BottleNoteAlcohol후보필드를근거값으로교정한다(t
 		result.ExportCountry.Alpha2 != "NL" || result.ExportCountry.Alpha3 != "NLD" {
 		t.Fatalf("countries = %+v / %+v", result.ManufactureCountry, result.ExportCountry)
 	}
-	if result.CaskCandidate != "SHERRY CASK" || result.DistilleryNameENCandidate != "THE MACALLAN DISTILLERS LTD" || result.DistilleryNameKOCandidate != "" {
+	if result.CaskCandidate != "SHERRY CASK" || result.DistilleryNameENCandidate != "" || result.DistilleryNameKOCandidate != "" {
 		t.Fatalf("candidates = %q / %q / %q", result.CaskCandidate, result.DistilleryNameKOCandidate, result.DistilleryNameENCandidate)
 	}
-	if !hasReason(result, ReasonCaskTypeCandidateExtracted) || !hasReason(result, ReasonOverseasEstablishmentDistilleryCandidate) {
+	if !hasReason(result, ReasonCaskTypeCandidateExtracted) || hasReason(result, ReasonOverseasEstablishmentDistilleryCandidate) {
 		t.Fatalf("reasons = %v", result.Reasons)
 	}
 }
