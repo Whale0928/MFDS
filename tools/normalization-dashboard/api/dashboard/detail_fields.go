@@ -81,8 +81,19 @@ var detailColumns = []detailColumn{
 	{"수입사와 제조사", "COALESCE(importer_search_key, '')", "수입사 검색용 이름", "같은 수입사를 찾기 위한 비교 전용 형태입니다."},
 	{"수입사와 제조사", "COALESCE(legal_entity_type, '')", "법인 형태", "주식회사, 유한회사처럼 원문에서 떼어낸 법인 표기입니다."},
 	{"수입사와 제조사", "COALESCE(overseas_establishment_search_key, '')", "해외 제조업소 검색용 이름", "해외 제조업소를 비교하기 위한 전용 형태입니다."},
-	{"수입사와 제조사", "COALESCE(distillery_name_ko_candidate, '')", "증류소 후보 (한글)", "제품명과 향후 증류소 사전을 대조해 확인할 후보입니다. 현재는 자동 생성하지 않습니다."},
-	{"수입사와 제조사", "COALESCE(distillery_name_en_candidate, '')", "증류소 후보 (영문)", "제품명과 향후 증류소 사전을 대조해 확인할 영문 후보입니다. 현재는 자동 생성하지 않습니다."},
+
+	{"증류소 매칭", "CASE WHEN declaration_v3.distillery_candidate_1_id IS NULL THEN '' ELSE CONCAT_WS(' · ', NULLIF(CONCAT_WS(' / ', NULLIF(distillery_candidate_1.kor_name, ''), NULLIF(distillery_candidate_1.eng_name, '')), ''), CONCAT('ID ', declaration_v3.distillery_candidate_1_id), CONCAT('점수 ', declaration_v3.distillery_candidate_1_score)) END", "1순위 후보", "정제값과 기준 데이터를 비교해 가장 높은 점수를 받은 증류소입니다."},
+	{"증류소 매칭", "CASE WHEN declaration_v3.distillery_candidate_2_id IS NULL THEN '' ELSE CONCAT_WS(' · ', NULLIF(CONCAT_WS(' / ', NULLIF(distillery_candidate_2.kor_name, ''), NULLIF(distillery_candidate_2.eng_name, '')), ''), CONCAT('ID ', declaration_v3.distillery_candidate_2_id), CONCAT('점수 ', declaration_v3.distillery_candidate_2_score)) END", "2순위 후보", "정제값과 기준 데이터를 비교해 두 번째로 높은 점수를 받은 증류소입니다."},
+	{"증류소 매칭", "CASE WHEN declaration_v3.distillery_candidate_3_id IS NULL THEN '' ELSE CONCAT_WS(' · ', NULLIF(CONCAT_WS(' / ', NULLIF(distillery_candidate_3.kor_name, ''), NULLIF(distillery_candidate_3.eng_name, '')), ''), CONCAT('ID ', declaration_v3.distillery_candidate_3_id), CONCAT('점수 ', declaration_v3.distillery_candidate_3_score)) END", "3순위 후보", "정제값과 기준 데이터를 비교해 세 번째로 높은 점수를 받은 증류소입니다."},
+	{"증류소 매칭", "COALESCE(CAST(declaration_v3.selected_distillery_id AS CHAR), '')", "선택한 증류소 ID", "관리자 또는 자동 확정 로직이 최종 선택한 BottleNote 증류소 ID입니다."},
+
+	{"리전 매칭", "CASE WHEN declaration_v3.region_candidate_1_id IS NULL THEN '' ELSE CONCAT_WS(' · ', NULLIF(CONCAT_WS(' / ', NULLIF(region_candidate_1.kor_name, ''), NULLIF(region_candidate_1.eng_name, '')), ''), CONCAT('ID ', declaration_v3.region_candidate_1_id), CONCAT('점수 ', declaration_v3.region_candidate_1_score)) END", "1순위 후보", "정제값과 기준 데이터를 비교해 가장 높은 점수를 받은 리전입니다."},
+	{"리전 매칭", "CASE WHEN declaration_v3.region_candidate_2_id IS NULL THEN '' ELSE CONCAT_WS(' · ', NULLIF(CONCAT_WS(' / ', NULLIF(region_candidate_2.kor_name, ''), NULLIF(region_candidate_2.eng_name, '')), ''), CONCAT('ID ', declaration_v3.region_candidate_2_id), CONCAT('점수 ', declaration_v3.region_candidate_2_score)) END", "2순위 후보", "정제값과 기준 데이터를 비교해 두 번째로 높은 점수를 받은 리전입니다."},
+	{"리전 매칭", "CASE WHEN declaration_v3.region_candidate_3_id IS NULL THEN '' ELSE CONCAT_WS(' · ', NULLIF(CONCAT_WS(' / ', NULLIF(region_candidate_3.kor_name, ''), NULLIF(region_candidate_3.eng_name, '')), ''), CONCAT('ID ', declaration_v3.region_candidate_3_id), CONCAT('점수 ', declaration_v3.region_candidate_3_score)) END", "3순위 후보", "정제값과 기준 데이터를 비교해 세 번째로 높은 점수를 받은 리전입니다."},
+	{"리전 매칭", "COALESCE(CAST(declaration_v3.selected_region_id AS CHAR), '')", "선택한 리전 ID", "관리자 또는 자동 확정 로직이 최종 선택한 BottleNote 리전 ID입니다."},
+
+	{"매칭 이력", "COALESCE(declaration_v3.matching_version, '')", "매칭 규칙 버전", "후보를 계산할 때 사용한 매칭 규칙과 기준 데이터 버전입니다."},
+	{"매칭 이력", "COALESCE(DATE_FORMAT(declaration_v3.matched_at, '%Y-%m-%d %H:%i:%s'), '')", "마지막 매칭 시각", "증류소와 리전 후보를 마지막으로 계산한 시각입니다."},
 
 	{"주류 분류", "COALESCE(alcohol_name_ko, '')", "주종 이름 (한글)", "위스키, 브랜디처럼 술의 종류를 가리키는 이름입니다."},
 	{"주류 분류", "COALESCE(alcohol_name_en, '')", "주종 이름 (영문)", "영문 기준 주종 이름입니다."},

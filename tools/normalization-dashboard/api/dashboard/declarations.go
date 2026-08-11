@@ -48,7 +48,15 @@ func (s *Server) declarations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, declarationListResponse{Declarations: items, Page: page, PageSize: pageSize, Total: total, TotalPages: pages(total, pageSize)})
 }
 
-const declarationV3SourceSQL = `declaration_details JOIN (SELECT id AS declaration_id, ingredient_percent_raw, ingredient_percent, variant_marker_raw, variant_marker_type, variant_marker_value FROM declarations) AS declaration_v3 ON declaration_v3.declaration_id = declaration_details.id`
+const declarationV3SourceSQL = `declaration_details JOIN (SELECT id AS declaration_id, ingredient_percent_raw, ingredient_percent, variant_marker_raw, variant_marker_type, variant_marker_value, distillery_candidate_1_id, distillery_candidate_1_score, distillery_candidate_2_id, distillery_candidate_2_score, distillery_candidate_3_id, distillery_candidate_3_score, selected_distillery_id, region_candidate_1_id, region_candidate_1_score, region_candidate_2_id, region_candidate_2_score, region_candidate_3_id, region_candidate_3_score, selected_region_id, matching_version, matched_at FROM declarations) AS declaration_v3 ON declaration_v3.declaration_id = declaration_details.id`
+
+const declarationMatchingSourceSQL = declarationV3SourceSQL + `
+LEFT JOIN distilleries AS distillery_candidate_1 ON distillery_candidate_1.id = declaration_v3.distillery_candidate_1_id
+LEFT JOIN distilleries AS distillery_candidate_2 ON distillery_candidate_2.id = declaration_v3.distillery_candidate_2_id
+LEFT JOIN distilleries AS distillery_candidate_3 ON distillery_candidate_3.id = declaration_v3.distillery_candidate_3_id
+LEFT JOIN regions AS region_candidate_1 ON region_candidate_1.id = declaration_v3.region_candidate_1_id
+LEFT JOIN regions AS region_candidate_2 ON region_candidate_2.id = declaration_v3.region_candidate_2_id
+LEFT JOIN regions AS region_candidate_3 ON region_candidate_3.id = declaration_v3.region_candidate_3_id`
 
 const declarationListSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, source_product_name_en, ''), COALESCE(sku_display_name_ko, sku_display_name_en, ''), COALESCE(base_product_name_ko, base_product_name_en, ''), COALESCE(CONCAT(unit_volume_ml, ' mL'), ''), CONCAT_WS(' · ', NULLIF(CONCAT(age_years, '년'), '년'), NULLIF(CAST(vintage_year AS CHAR), ''), NULLIF(CONCAT(abv_percent, '%'), '%'), NULLIF(CONCAT(proof_value, ' proof'), ' proof'), NULLIF(strength_type, ''), NULLIF(version_marker, ''), NULLIF(edition_name, ''), NULLIF(declaration_v3.variant_marker_raw, ''), NULLIF(declaration_v3.variant_marker_type, ''), NULLIF(material_code, ''), NULLIF(cask_number, ''), NULLIF(batch_number, '')), normalization_status, COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), CAST(normalization_reasons AS CHAR) FROM ` + declarationV3SourceSQL
 
@@ -137,7 +145,7 @@ func (s *Server) detailGroups(r *http.Request, rcno string) ([]detailGroup, erro
 	for index, column := range detailColumns {
 		expressions[index] = column.Expr
 	}
-	rows, err := s.queryer.QueryContext(r.Context(), "SELECT "+strings.Join(expressions, ", ")+" FROM "+declarationV3SourceSQL+" WHERE rcno = ? LIMIT 1", rcno)
+	rows, err := s.queryer.QueryContext(r.Context(), "SELECT "+strings.Join(expressions, ", ")+" FROM "+declarationMatchingSourceSQL+" WHERE rcno = ? LIMIT 1", rcno)
 	if err != nil {
 		return nil, err
 	}

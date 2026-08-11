@@ -175,7 +175,7 @@ func TestDetailColumns_원장과정제를모두노출하고수집metadata는제�
 	for _, column := range detailColumns {
 		titles[column.Group] = true
 	}
-	for _, expected := range []string{"원장 - 수집한 그대로", "제품명 정제 결과", "용량과 도수", "관리 번호", "정제 이력"} {
+	for _, expected := range []string{"원장 - 수집한 그대로", "제품명 정제 결과", "용량과 도수", "관리 번호", "증류소 매칭", "리전 매칭", "매칭 이력", "정제 이력"} {
 		if !titles[expected] {
 			t.Fatalf("그룹 %q 가 없다", expected)
 		}
@@ -259,10 +259,43 @@ func TestDashboardV3Queries_기존View를교체하지않고BaseTable컬럼을조
 			t.Fatalf("%s query does not join declarations v3 columns: %s", name, query)
 		}
 	}
-	for _, column := range []string{"ingredient_percent_raw", "ingredient_percent", "variant_marker_raw", "variant_marker_type", "variant_marker_value"} {
+	for _, column := range []string{"ingredient_percent_raw", "ingredient_percent", "variant_marker_raw", "variant_marker_type", "variant_marker_value", "distillery_candidate_1_id", "distillery_candidate_3_score", "selected_distillery_id", "region_candidate_1_id", "region_candidate_3_score", "selected_region_id", "matching_version", "matched_at"} {
 		if !strings.Contains(declarationV3SourceSQL, column) {
 			t.Fatalf("v3 source does not select %s: %s", column, declarationV3SourceSQL)
 		}
+	}
+}
+
+func TestMatchingDetail_후보이름과점수를기준테이블에서조회한다(t *testing.T) {
+	for _, join := range []string{
+		"LEFT JOIN distilleries AS distillery_candidate_1",
+		"LEFT JOIN distilleries AS distillery_candidate_2",
+		"LEFT JOIN distilleries AS distillery_candidate_3",
+		"LEFT JOIN regions AS region_candidate_1",
+		"LEFT JOIN regions AS region_candidate_2",
+		"LEFT JOIN regions AS region_candidate_3",
+	} {
+		if !strings.Contains(declarationMatchingSourceSQL, join) {
+			t.Fatalf("매칭 상세 조회에 %q 조인이 없다", join)
+		}
+	}
+
+	labels := map[string]map[string]bool{}
+	for _, column := range detailColumns {
+		if labels[column.Group] == nil {
+			labels[column.Group] = map[string]bool{}
+		}
+		labels[column.Group][column.Label] = true
+	}
+	for _, group := range []string{"증류소 매칭", "리전 매칭"} {
+		for _, label := range []string{"1순위 후보", "2순위 후보", "3순위 후보"} {
+			if !labels[group][label] {
+				t.Fatalf("%s 그룹에 %s가 없다", group, label)
+			}
+		}
+	}
+	if !labels["매칭 이력"]["매칭 규칙 버전"] || !labels["매칭 이력"]["마지막 매칭 시각"] {
+		t.Fatal("매칭 버전 또는 실행 시각이 없다")
 	}
 }
 
