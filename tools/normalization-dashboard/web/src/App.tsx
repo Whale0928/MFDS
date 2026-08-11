@@ -6,9 +6,10 @@ import { DetailDrawer } from './components/DetailDrawer'
 import { Hint, Term } from './components/Hint'
 import { hintFor } from './glossary'
 import { StatusChip } from './components/StatusChip'
-import type { Declaration, DeclarationPage, Filters, Quality } from './types'
+import type { Declaration, DeclarationPage, DeclarationSort, Filters, MatchFilter, Quality, SortOrder } from './types'
 
 type Section = 'browse' | 'review' | 'quality'
+type MatchingSort = `${DeclarationSort}:${SortOrder}`
 const PAGE_SIZE = 20
 const blankFilters: Filters = { statuses: [], item_names: [], importers: [], countries: [], reason_codes: [] }
 
@@ -28,13 +29,20 @@ export default function App() {
   const [importer, setImporter] = useState('')
   const [country, setCountry] = useState('')
   const [reason, setReason] = useState('')
+  const [alcoholMatch, setAlcoholMatch] = useState<MatchFilter>('')
+  const [distilleryMatch, setDistilleryMatch] = useState<MatchFilter>('')
+  const [regionMatch, setRegionMatch] = useState<MatchFilter>('')
+  const [matchingSort, setMatchingSort] = useState<MatchingSort>('processed_at:desc')
   const [page, setPage] = useState(1)
   const [reviewPage, setReviewPage] = useState(1)
   const [selected, setSelected] = useState<Declaration | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const filterLoad = useMemo(() => api.filters, [])
   const qualityLoad = useMemo(() => api.quality, [])
-  const declarationLoad = useMemo(() => () => api.declarations({ page, page_size: PAGE_SIZE, q: query || undefined, status: status || undefined, item_name: itemName || undefined, importer: importer || undefined, country: country || undefined, reason: reason || undefined }), [page, query, status, itemName, importer, country, reason])
+  const declarationLoad = useMemo(() => {
+    const [sort, order] = matchingSort.split(':') as [DeclarationSort, SortOrder]
+    return () => api.declarations({ page, page_size: PAGE_SIZE, q: query || undefined, status: status || undefined, item_name: itemName || undefined, importer: importer || undefined, country: country || undefined, reason: reason || undefined, alcohol_match: alcoholMatch || undefined, distillery_match: distilleryMatch || undefined, region_match: regionMatch || undefined, sort, order })
+  }, [page, query, status, itemName, importer, country, reason, alcoholMatch, distilleryMatch, regionMatch, matchingSort])
   const reviewLoad = useMemo(() => () => api.declarations({ page: reviewPage, page_size: PAGE_SIZE, status: 'REVIEW_REQUIRED' }), [reviewPage])
   const filters = useRemote<Filters>(filterLoad, blankFilters)
   const quality = useRemote<Quality>(qualityLoad, null)
@@ -57,7 +65,7 @@ export default function App() {
       <p className="masthead__note">읽기 전용 / 이 화면에서는 아무 값도 고치지 않습니다</p>
     </header>
 
-    {section === 'browse' && <BrowseView page={declarations.data} loading={declarations.loading} error={declarations.error} filters={filters.data ?? blankFilters} query={query} status={status} itemName={itemName} importer={importer} country={country} reason={reason} onQuery={setQuery} onStatus={setStatus} onItemName={setItemName} onImporter={setImporter} onCountry={setCountry} onReason={setReason} onOpen={openDetail} pageNumber={page} onPage={setPage} />}
+    {section === 'browse' && <BrowseView page={declarations.data} loading={declarations.loading} error={declarations.error} filters={filters.data ?? blankFilters} query={query} status={status} itemName={itemName} importer={importer} country={country} reason={reason} alcoholMatch={alcoholMatch} distilleryMatch={distilleryMatch} regionMatch={regionMatch} matchingSort={matchingSort} onQuery={setQuery} onStatus={setStatus} onItemName={setItemName} onImporter={setImporter} onCountry={setCountry} onReason={setReason} onAlcoholMatch={setAlcoholMatch} onDistilleryMatch={setDistilleryMatch} onRegionMatch={setRegionMatch} onMatchingSort={setMatchingSort} onOpen={openDetail} pageNumber={page} onPage={setPage} />}
     {section === 'review' && <ReviewView quality={quality.data} loading={quality.loading || reviews.loading} error={quality.error ?? reviews.error} declarations={reviews.data} onOpen={openDetail} pageNumber={reviewPage} onPage={setReviewPage} />}
     {section === 'quality' && <QualityView quality={quality.data} loading={quality.loading} error={quality.error} />}
 
@@ -66,11 +74,11 @@ export default function App() {
   </main>
 }
 
-function BrowseView({ page, loading, error, filters, query, status, itemName, importer, country, reason, onQuery, onStatus, onItemName, onImporter, onCountry, onReason, onOpen, pageNumber, onPage }: { page: DeclarationPage | null; loading: boolean; error: string | null; filters: Filters; query: string; status: string; itemName: string; importer: string; country: string; reason: string; onQuery: (value: string) => void; onStatus: (value: string) => void; onItemName: (value: string) => void; onImporter: (value: string) => void; onCountry: (value: string) => void; onReason: (value: string) => void; onOpen: (entry: Declaration) => void; pageNumber: number; onPage: (value: number) => void }) {
+function BrowseView({ page, loading, error, filters, query, status, itemName, importer, country, reason, alcoholMatch, distilleryMatch, regionMatch, matchingSort, onQuery, onStatus, onItemName, onImporter, onCountry, onReason, onAlcoholMatch, onDistilleryMatch, onRegionMatch, onMatchingSort, onOpen, pageNumber, onPage }: { page: DeclarationPage | null; loading: boolean; error: string | null; filters: Filters; query: string; status: string; itemName: string; importer: string; country: string; reason: string; alcoholMatch: MatchFilter; distilleryMatch: MatchFilter; regionMatch: MatchFilter; matchingSort: MatchingSort; onQuery: (value: string) => void; onStatus: (value: string) => void; onItemName: (value: string) => void; onImporter: (value: string) => void; onCountry: (value: string) => void; onReason: (value: string) => void; onAlcoholMatch: (value: MatchFilter) => void; onDistilleryMatch: (value: MatchFilter) => void; onRegionMatch: (value: MatchFilter) => void; onMatchingSort: (value: MatchingSort) => void; onOpen: (entry: Declaration) => void; pageNumber: number; onPage: (value: number) => void }) {
   const totalPages = Math.max(1, Math.ceil((page?.total ?? 0) / PAGE_SIZE))
   return <div className="page">
     <PageTitle title="식약처 원본과 정제 결과" copy="한 줄이 수입신고 한 건입니다. 줄을 누르면 그 건의 원본 값과 정제된 값을 빠짐없이 볼 수 있습니다." />
-    <section className="filter-bar">
+    <section className="filter-bar filter-bar--primary">
       <label>검색<input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="제품명 또는 수입신고번호" /></label>
       <SelectFilter label="정제 상태" term="정제" value={status} values={filters.statuses} labeller={statusLabel} onChange={onStatus} />
       <SelectFilter label="품목" term="품목" value={itemName} values={filters.item_names} onChange={onItemName} />
@@ -78,6 +86,13 @@ function BrowseView({ page, loading, error, filters, query, status, itemName, im
       <SelectFilter label="제조 국가" term="제조 국가" value={country} values={filters.countries} onChange={onCountry} />
       <SelectFilter label="확인 사유" term="확인 사유" value={reason} values={filters.reason_codes} labeller={reasonLabel} onChange={onReason} />
       <span className="filter-bar__count">{number(page?.total)}건</span>
+    </section>
+    <section className="filter-bar matching-filter-bar" aria-label="BottleNote 매칭 필터">
+      <div className="matching-filter-bar__title"><strong>BottleNote 후보</strong><small>1순위 후보 생성 여부</small></div>
+      <MatchSelect label="알코올 매칭" value={alcoholMatch} onChange={onAlcoholMatch} />
+      <MatchSelect label="증류소 매칭" value={distilleryMatch} onChange={onDistilleryMatch} />
+      <MatchSelect label="리전 매칭" value={regionMatch} onChange={onRegionMatch} />
+      <label>정렬<select value={matchingSort} onChange={(event) => onMatchingSort(event.target.value as MatchingSort)} aria-label="매칭 여부 정렬"><option value="processed_at:desc">최신 처리일순</option><option value="alcohol:desc">알코올 후보 있음 먼저</option><option value="alcohol:asc">알코올 후보 없음 먼저</option><option value="distillery:desc">증류소 후보 있음 먼저</option><option value="distillery:asc">증류소 후보 없음 먼저</option><option value="region:desc">리전 후보 있음 먼저</option><option value="region:asc">리전 후보 없음 먼저</option></select></label>
     </section>
     {loading && <Loading label="목록을 읽는 중" />}{error && <ErrorPanel message={error} />}
     {page && <><DeclarationTable entries={page.declarations} onOpen={onOpen} /><div className="pagination"><button disabled={pageNumber <= 1} onClick={() => onPage(pageNumber - 1)}>이전</button><span>{pageNumber} / {totalPages}</span><button disabled={pageNumber >= totalPages} onClick={() => onPage(pageNumber + 1)}>다음</button></div></>}
@@ -141,6 +156,7 @@ function DeclarationTable({ entries, onOpen, compact = false }: { entries: Decla
       <Hint text="용량, 도수, 관리번호를 모두 떼어낸 순수한 제품 이름입니다."><span>제품 이름</span></Hint>
       <Hint text="병 한 개의 용량입니다. 6병 세트여도 한 병 기준입니다."><span>병 하나 용량</span></Hint>
       <Hint text="숙성 연수, 빈티지, 도수, 에디션, 자재 코드처럼 같은 제품을 갈라놓는 값입니다."><span>제품 특성</span></Hint>
+      <Hint text="BottleNote 기준 데이터와 비교해 1순위 후보가 만들어졌는지 보여줍니다. 확정 선택 여부와는 다릅니다."><span>BottleNote 후보</span></Hint>
       <Hint text="이 건을 자동으로 어디까지 해석했는지입니다."><span>정제 상태</span></Hint>
       <Hint text="식약처가 이 신고 건을 처리한 날짜입니다."><span>처리일</span></Hint>
     </div>
@@ -150,10 +166,20 @@ function DeclarationTable({ entries, onOpen, compact = false }: { entries: Decla
       <span data-label="제품 이름">{entry.key_1 || '—'}</span>
       <span data-label="병 하나 용량">{entry.key_2 || '—'}</span>
       <span data-label="제품 특성">{entry.key_3 || '—'}</span>
+      <span data-label="BottleNote 후보"><MatchingRail entry={entry} /></span>
       <span data-label="정제 상태"><StatusChip status={entry.status} /></span>
       <span data-label="처리일">{date(entry.processed_at)}</span>
     </button>)}
   </div>
+}
+
+function MatchingRail({ entry }: { entry: Declaration }) {
+  const matches = [['알코올', entry.alcohol_matched], ['증류소', entry.distillery_matched], ['리전', entry.region_matched]] as Array<[string, boolean]>
+  return <span className="matching-rail" aria-label={matches.map(([label, matched]) => `${label} 후보 ${matched ? '있음' : '없음'}`).join(', ')}>{matches.map(([label, matched]) => <span className={`matching-flag matching-flag--${matched ? 'candidate' : 'missing'}`} key={label}><b>{label}</b><i>{matched ? '후보' : '없음'}</i></span>)}</span>
+}
+
+function MatchSelect({ label, value, onChange }: { label: string; value: MatchFilter; onChange: (value: MatchFilter) => void }) {
+  return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value as MatchFilter)} aria-label={label}><option value="">전체</option><option value="matched">후보 있음</option><option value="unmatched">후보 없음</option></select></label>
 }
 
 function SelectFilter({ label, term, value, values, labeller, onChange }: { label: string; term?: string; value: string; values: string[]; labeller?: (value: string) => string; onChange: (value: string) => void }) {

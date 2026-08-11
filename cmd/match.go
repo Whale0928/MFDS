@@ -22,7 +22,7 @@ func newMatchCommand(getConfig func() config.Config, run RunMatchingFunc, out io
 	var force bool
 	command := &cobra.Command{
 		Use:   "match",
-		Short: "정제 결과의 증류소·리전 후보를 계산합니다",
+		Short: "정제 결과의 알코올·증류소·리전 후보를 계산합니다",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("limit") && limit <= 0 {
@@ -35,8 +35,8 @@ func newMatchCommand(getConfig func() config.Config, run RunMatchingFunc, out io
 				Limit: limit, RCNO: rcno, All: all, DryRun: dryRun, Force: force,
 			})
 			fmt.Fprintf(out,
-				"match 결과: processed=%d distillery_matched=%d region_matched=%d no_match=%d remaining=%d version=%s dry_run=%t\n",
-				summary.Processed, summary.DistilleryMatched, summary.RegionMatched,
+				"match 결과: processed=%d alcohol_matched=%d distillery_matched=%d region_matched=%d no_match=%d remaining=%d version=%s dry_run=%t\n",
+				summary.Processed, summary.AlcoholMatched, summary.DistilleryMatched, summary.RegionMatched,
 				summary.NoMatch, summary.Remaining, summary.MatchingVersion, dryRun,
 			)
 			return err

@@ -94,7 +94,7 @@ func TestDeclarations_usesReadOnlyPaginationAndSnakeCase(t *testing.T) {
 			if len(args) != 6 {
 				return nil, fmt.Errorf("list args = %d", len(args))
 			}
-			return &fakeRows{values: [][]any{{"202600000001", "원본명", "정제명", "700 · 40%", "12년", "", "NORMALIZED", "2026-08-01", "위스키", "수입사", "영국", `["AMBIGUOUS"]`}}}, nil
+			return &fakeRows{values: [][]any{{"202600000001", "원본명", "정제명", "700 · 40%", "12년", "", "NORMALIZED", "2026-08-01", "위스키", "수입사", "영국", true, false, true, `["AMBIGUOUS"]`}}}, nil
 		default:
 			return nil, fmt.Errorf("unexpected query")
 		}
@@ -107,6 +107,9 @@ func TestDeclarations_usesReadOnlyPaginationAndSnakeCase(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"declarations"`) || !strings.Contains(response.Body.String(), `"source_name"`) || strings.Contains(response.Body.String(), `"internal_path"`) {
 		t.Fatalf("unexpected public response: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"alcohol_matched":true`) || !strings.Contains(response.Body.String(), `"distillery_matched":false`) || !strings.Contains(response.Body.String(), `"region_matched":true`) {
+		t.Fatalf("matching flags are missing: %s", response.Body.String())
 	}
 }
 
@@ -128,6 +131,50 @@ func TestDeclarations_supportsQAndReasonFilter(t *testing.T) {
 	where, args := filter.where()
 	if !strings.Contains(where, "JSON_CONTAINS(normalization_reasons") || len(args) != 4 || args[3] != "AMBIGUOUS" {
 		t.Fatalf("reason filter = %q %#v", where, args)
+	}
+}
+
+func TestDeclarations_매칭여부필터와전체목록정렬을지원한다(t *testing.T) {
+	filter, _, _, err := parseListRequest(urlValues(
+		"alcohol_match", "matched",
+		"distillery_match", "unmatched",
+		"region_match", "matched",
+		"sort", "distillery",
+		"order", "asc",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	where, args := filter.where()
+	for _, clause := range []string{
+		"declaration_v3.alcohol_candidate_1_id IS NOT NULL",
+		"declaration_v3.distillery_candidate_1_id IS NULL",
+		"declaration_v3.region_candidate_1_id IS NOT NULL",
+	} {
+		if !strings.Contains(where, clause) {
+			t.Fatalf("where clause does not contain %q: %s", clause, where)
+		}
+	}
+	if len(args) != 0 {
+		t.Fatalf("matching filter args = %#v", args)
+	}
+	wantOrder := "ORDER BY (declaration_v3.distillery_candidate_1_id IS NOT NULL) ASC, source_processed_date DESC, source_item_id DESC"
+	if !strings.Contains(filter.orderBy(), wantOrder) {
+		t.Fatalf("order by = %q", filter.orderBy())
+	}
+}
+
+func TestDeclarations_허용하지않은매칭필터와정렬값을거부한다(t *testing.T) {
+	for name, values := range map[string]url.Values{
+		"match": urlValues("alcohol_match", "maybe"),
+		"sort":  urlValues("sort", "source_product_name"),
+		"order": urlValues("order", "random"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, _, err := parseListRequest(values); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
 	}
 }
 
@@ -259,7 +306,7 @@ func TestDashboardV3Queries_기존View를교체하지않고BaseTable컬럼을조
 			t.Fatalf("%s query does not join declarations v3 columns: %s", name, query)
 		}
 	}
-	for _, column := range []string{"ingredient_percent_raw", "ingredient_percent", "variant_marker_raw", "variant_marker_type", "variant_marker_value", "distillery_candidate_1_id", "distillery_candidate_3_score", "selected_distillery_id", "region_candidate_1_id", "region_candidate_3_score", "selected_region_id", "matching_version", "matched_at"} {
+	for _, column := range []string{"ingredient_percent_raw", "ingredient_percent", "variant_marker_raw", "variant_marker_type", "variant_marker_value", "alcohol_candidate_1_id", "alcohol_candidate_3_score", "selected_alcohol_id", "distillery_candidate_1_id", "distillery_candidate_3_score", "selected_distillery_id", "region_candidate_1_id", "region_candidate_3_score", "selected_region_id", "matching_version", "matching_run_id", "alcohol_match_decision", "distillery_match_source", "region_match_source", "matched_at"} {
 		if !strings.Contains(declarationV3SourceSQL, column) {
 			t.Fatalf("v3 source does not select %s: %s", column, declarationV3SourceSQL)
 		}
@@ -268,6 +315,9 @@ func TestDashboardV3Queries_기존View를교체하지않고BaseTable컬럼을조
 
 func TestMatchingDetail_후보이름과점수를기준테이블에서조회한다(t *testing.T) {
 	for _, join := range []string{
+		"LEFT JOIN alcohols AS alcohol_candidate_1",
+		"LEFT JOIN alcohols AS alcohol_candidate_2",
+		"LEFT JOIN alcohols AS alcohol_candidate_3",
 		"LEFT JOIN distilleries AS distillery_candidate_1",
 		"LEFT JOIN distilleries AS distillery_candidate_2",
 		"LEFT JOIN distilleries AS distillery_candidate_3",
@@ -287,7 +337,7 @@ func TestMatchingDetail_후보이름과점수를기준테이블에서조회한�
 		}
 		labels[column.Group][column.Label] = true
 	}
-	for _, group := range []string{"증류소 매칭", "리전 매칭"} {
+	for _, group := range []string{"알코올 매칭", "증류소 매칭", "리전 매칭"} {
 		for _, label := range []string{"1순위 후보", "2순위 후보", "3순위 후보"} {
 			if !labels[group][label] {
 				t.Fatalf("%s 그룹에 %s가 없다", group, label)
@@ -297,6 +347,17 @@ func TestMatchingDetail_후보이름과점수를기준테이블에서조회한�
 	if !labels["매칭 이력"]["매칭 규칙 버전"] || !labels["매칭 이력"]["마지막 매칭 시각"] {
 		t.Fatal("매칭 버전 또는 실행 시각이 없다")
 	}
+	if !labels["매칭 이력"]["매칭 실행 ID"] || !strings.Contains(strings.Join(detailExpressions(), " "), "FORMAT(") {
+		t.Fatal("매칭 실행 ID 또는 소수점 두 자리 점수 포맷이 없다")
+	}
+}
+
+func detailExpressions() []string {
+	result := make([]string, len(detailColumns))
+	for index, column := range detailColumns {
+		result[index] = column.Expr
+	}
+	return result
 }
 
 func urlValues(parts ...string) url.Values {

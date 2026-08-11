@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
@@ -25,7 +26,19 @@ func runMatching(
 	if err != nil {
 		return usecase.Summary{}, err
 	}
-	service, err := usecase.NewService(store, matcher, usecase.Options{DefaultLimit: cfg.Normalization.RunLimit})
+	var runID int64
+	if !command.DryRun {
+		runID, err = store.StartMatchingRun(ctx, matcher.Version(), "", "MATCH")
+		if err != nil {
+			return usecase.Summary{}, err
+		}
+		defer func() {
+			finishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			runErr = errors.Join(runErr, store.FinishMatchingRun(finishCtx, runID, summary, runErr))
+		}()
+	}
+	service, err := usecase.NewService(store, matcher, usecase.Options{DefaultLimit: cfg.Normalization.RunLimit, RunID: runID})
 	if err != nil {
 		return usecase.Summary{}, err
 	}

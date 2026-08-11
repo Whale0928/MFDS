@@ -31,7 +31,20 @@ func runNormalization(
 		return usecase.Summary{SystemFailures: 1}, err
 	}
 
-	service, err := usecase.NewService(store, parserAdapter{matcher: matcher}, usecase.Options{
+	var matchingRunID int64
+	if !command.DryRun {
+		matchingRunID, err = store.StartMatchingRun(ctx, matcher.Version(), parser.Version, "NORMALIZATION")
+		if err != nil {
+			return usecase.Summary{SystemFailures: 1}, err
+		}
+		defer func() {
+			finishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			runErr = errors.Join(runErr, store.FinishMatchingRun(finishCtx, matchingRunID, summary, runErr))
+		}()
+	}
+
+	service, err := usecase.NewService(store, parserAdapter{matcher: matcher, matchingRunID: matchingRunID}, usecase.Options{
 		RunLimit:             cfg.Normalization.RunLimit,
 		LeaseDuration:        cfg.Normalization.LeaseDuration,
 		MaxAttempts:          cfg.Normalization.MaxAttempts,
@@ -47,7 +60,8 @@ func runNormalization(
 }
 
 type parserAdapter struct {
-	matcher *matchdomain.ReferenceSnapshot
+	matcher       *matchdomain.ReferenceSnapshot
+	matchingRunID int64
 }
 
 func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
@@ -69,7 +83,8 @@ func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) 
 		BaseNameKO: result.BaseProductNameKO, BaseNameEN: result.BaseProductNameEN,
 		SearchNameKO: result.NameSearchKeyKO, SearchNameEN: result.NameSearchKeyEN,
 		ABVPercent: result.ABVPercent, Age: result.AgeRaw, AgeYears: result.AgeYears,
-		Cask: result.CaskCandidate, ManufactureCountry: result.ManufactureCountry.NameEN,
+		Cask: result.CaskCandidate, Edition: result.EditionName, Category: result.AlcoholCategoryEN,
+		UnitVolumeML: result.UnitVolumeML, ManufactureCountry: result.ManufactureCountry.NameEN,
 	})
 	return usecase.Result{
 		Status: usecase.Status(result.Status),
@@ -132,9 +147,12 @@ func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) 
 			ExportCountryNameEN:            result.ExportCountry.NameEN,
 			ExportCountryAlpha2:            result.ExportCountry.Alpha2,
 			ExportCountryAlpha3:            result.ExportCountry.Alpha3,
+			AlcoholCandidates:              referenceCandidates(match.Alcohols),
 			DistilleryCandidates:           referenceCandidates(match.Distilleries),
 			RegionCandidates:               referenceCandidates(match.Regions),
 			MatchingVersion:                match.Version.String(),
+			MatchingRunID:                  p.matchingRunID,
+			MatchingResult:                 match,
 		},
 		Reasons:           reasons,
 		UnparsedFragments: result.UnparsedFragments,

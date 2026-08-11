@@ -32,11 +32,15 @@ func (s *Store) LoadMatchingSnapshot(ctx context.Context) (*domain.ReferenceSnap
 	if len(alcohols) == 0 || len(distilleries) == 0 || len(regions) == 0 {
 		return nil, fmt.Errorf("matching 기준 데이터가 비어 있습니다: alcohols=%d distilleries=%d regions=%d", len(alcohols), len(distilleries), len(regions))
 	}
-	parts := append(append(alcoholParts, distilleryParts...), regionParts...)
+	aliases, aliasParts, err := s.loadReferenceAliases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	parts := append(append(append(alcoholParts, distilleryParts...), regionParts...), aliasParts...)
 	sort.Strings(parts)
 	digest := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	version := domain.DefaultMatchingVersion(hex.EncodeToString(digest[:]))
-	return domain.NewReferenceSnapshot(alcohols, distilleries, regions, version)
+	return domain.NewReferenceSnapshotWithAliases(alcohols, distilleries, regions, aliases, version)
 }
 
 func (s *Store) loadAlcoholReferences(ctx context.Context) ([]domain.AlcoholReference, []string, error) {
@@ -128,14 +132,41 @@ func (s *Store) loadRegionReferences(ctx context.Context) ([]domain.RegionRefere
 	return references, parts, nil
 }
 
+func (s *Store) loadReferenceAliases(ctx context.Context) ([]domain.ReferenceAlias, []string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT entity_type, entity_id, alias_norm, language, source
+		FROM reference_aliases
+		ORDER BY entity_type, entity_id, alias_norm, language
+	`)
+	if err != nil {
+		return nil, nil, fmt.Errorf("matching 별칭 조회 실패: %w", err)
+	}
+	defer closeRows(rows, "matching 별칭")
+	var aliases []domain.ReferenceAlias
+	var parts []string
+	for rows.Next() {
+		var alias domain.ReferenceAlias
+		if err := rows.Scan(&alias.EntityType, &alias.EntityID, &alias.Alias, &alias.Language, &alias.Source); err != nil {
+			return nil, nil, fmt.Errorf("matching 별칭 scan 실패: %w", err)
+		}
+		aliases = append(aliases, alias)
+		parts = append(parts, fmt.Sprintf("x|%s|%d|%s|%s|%s", alias.EntityType, alias.EntityID, alias.Alias, alias.Language, alias.Source))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("matching 별칭 rows 실패: %w", err)
+	}
+	return aliases, parts, nil
+}
+
 func (s *Store) ListMatchingSources(ctx context.Context, query usecase.Query) ([]usecase.Source, error) {
 	statement := `
 		SELECT id, rcno, source_item_id, normalization_version, normalized_at,
 		       COALESCE(matching_version, ''),
 		       COALESCE(base_product_name_ko, ''), COALESCE(base_product_name_en, ''),
 		       COALESCE(name_search_key_ko, ''), COALESCE(name_search_key_en, ''),
-		       abv_percent, COALESCE(age_raw, ''), age_years, COALESCE(cask_candidate, ''),
-		       COALESCE(manufacture_country_name_en, '')
+			       abv_percent, COALESCE(age_raw, ''), age_years, COALESCE(cask_candidate, ''),
+			       unit_volume_ml, COALESCE(edition_name, ''), COALESCE(alcohol_category_en, ''),
+			       COALESCE(manufacture_country_name_en, '')
 		FROM declarations
 		WHERE normalization_status IN ('NORMALIZED', 'PARTIAL', 'REVIEW_REQUIRED', 'UNPARSED')
 		  AND normalized_at IS NOT NULL
@@ -157,12 +188,14 @@ func (s *Store) ListMatchingSources(ctx context.Context, query usecase.Query) ([
 		var source usecase.Source
 		var abv sql.NullFloat64
 		var age sql.NullInt64
+		var unitVolume sql.NullInt64
 		if err := rows.Scan(
 			&source.DeclarationID, &source.RCNO, &source.SourceItemID,
 			&source.NormalizationVersion, &source.NormalizedAt, &source.MatchingVersion,
 			&source.BaseProductNameKO, &source.BaseProductNameEN,
 			&source.NameSearchKeyKO, &source.NameSearchKeyEN,
-			&abv, &source.AgeRaw, &age, &source.CaskCandidate, &source.ManufactureCountryName,
+			&abv, &source.AgeRaw, &age, &source.CaskCandidate,
+			&unitVolume, &source.EditionName, &source.AlcoholCategory, &source.ManufactureCountryName,
 		); err != nil {
 			return nil, fmt.Errorf("matching 대상 scan 실패: %w", err)
 		}
@@ -174,6 +207,10 @@ func (s *Store) ListMatchingSources(ctx context.Context, query usecase.Query) ([
 			value := int(age.Int64)
 			source.AgeYears = &value
 		}
+		if unitVolume.Valid {
+			value := int(unitVolume.Int64)
+			source.UnitVolumeML = &value
+		}
 		sources = append(sources, source)
 	}
 	if err := rows.Err(); err != nil {
@@ -183,25 +220,50 @@ func (s *Store) ListMatchingSources(ctx context.Context, query usecase.Query) ([
 }
 
 func (s *Store) SaveMatchingResult(ctx context.Context, completion usecase.Completion) error {
-	assign := newColumnAssignments(14)
+	assign := newColumnAssignments(20)
+	setStoredCandidates(assign, "alcohol", storedMatchingCandidates(completion.Result.Alcohols))
 	setStoredCandidates(assign, "distillery", storedMatchingCandidates(completion.Result.Distilleries))
 	setStoredCandidates(assign, "region", storedMatchingCandidates(completion.Result.Regions))
 	assign.set("matching_version", completion.Version)
 	assign.set("matched_at", completion.MatchedAt)
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE declarations
-		SET `+assign.clause()+`
-		WHERE id = ? AND rcno = ? AND source_item_id = ?
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("matching 결과 transaction 시작 실패: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `
+			UPDATE declarations
+			SET `+assign.clause()+`,
+			    matching_run_id = ?, alcohol_match_decision = ?,
+			    distillery_match_source = ?, region_match_source = ?,
+			    selected_alcohol_id = COALESCE(selected_alcohol_id, ?),
+			    selected_distillery_id = COALESCE(selected_distillery_id, ?),
+			    selected_region_id = COALESCE(selected_region_id, ?)
+			WHERE id = ? AND rcno = ? AND source_item_id = ?
 		  AND normalization_version = ? AND normalized_at = ?
 		  AND COALESCE(matching_version, '') = ?
-	`, assign.arguments(
+		`, assign.arguments(
+		completion.RunID, completion.Result.AlcoholDecision.Status,
+		completion.Result.DistilleryDecision.Source, completion.Result.RegionDecision.Source,
+		nullablePositiveID(completion.Result.AlcoholDecision.SelectedID),
+		nullablePositiveID(completion.Result.DistilleryDecision.SelectedID),
+		nullablePositiveID(completion.Result.RegionDecision.SelectedID),
 		completion.Source.DeclarationID, completion.Source.RCNO, completion.Source.SourceItemID,
 		completion.Source.NormalizationVersion, completion.Source.NormalizedAt, completion.Source.MatchingVersion,
 	)...)
 	if err != nil {
 		return fmt.Errorf("matching 결과 저장 실패: %w", err)
 	}
-	return requireOne(result, "matching 결과 저장")
+	if err := requireOne(result, "matching 결과 저장"); err != nil {
+		return err
+	}
+	if err := saveMatchingRecords(ctx, tx, completion.RunID, completion.Source.DeclarationID, completion.Result, completion.MatchedAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("matching 결과 transaction commit 실패: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) MatchingRemaining(ctx context.Context, version string) (int, error) {
@@ -241,19 +303,9 @@ func setStoredCandidates(assign *columnAssignments, prefix string, candidates []
 func storedMatchingCandidates(candidates []domain.Candidate) []storedCandidate {
 	stored := make([]storedCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		stored = append(stored, storedCandidate{id: candidate.ID, score: normalizedCandidateScore(candidate.Score)})
+		stored = append(stored, storedCandidate{id: candidate.ID, score: candidate.Score})
 	}
 	return stored
-}
-
-func normalizedCandidateScore(score int) float64 {
-	if score <= 0 {
-		return 0
-	}
-	if score >= 100 {
-		return 1
-	}
-	return float64(score) / 100
 }
 
 func nullableReferenceTime(value *time.Time) string {

@@ -30,10 +30,38 @@ export interface Declaration {
   item_name?: string
   importer_name?: string
   country?: string
+  alcohol_matched?: boolean
+  distillery_matched?: boolean
+  region_matched?: boolean
   reason_codes?: string[]
   evidence?: DetailEvidence[]
   fields?: Record<string, string>
   groups?: DetailGroup[]
+  matching_candidates?: MatchingCandidate[]
+}
+
+export type MatchFilter = '' | 'matched' | 'unmatched'
+export type DeclarationSort = 'processed_at' | 'alcohol' | 'distillery' | 'region'
+export type SortOrder = 'asc' | 'desc'
+
+export interface MatchingCandidate {
+  target_type: 'ALCOHOL' | 'DISTILLERY' | 'REGION' | string
+  target_id: number
+  rank: number
+  name_ko: string
+  name_en: string
+  score: number
+  evidence: MatchingEvidence[]
+}
+
+export interface MatchingEvidence {
+  feature_code: string
+  source: string
+  input_value: string
+  reference_value: string
+  rule_code: string
+  weight: number
+  upstream_target_id: number
 }
 
 export interface DetailField {
@@ -89,4 +117,9 @@ export interface DeclarationQuery {
   importer?: string
   country?: string
   reason?: string
+  alcohol_match?: MatchFilter
+  distillery_match?: MatchFilter
+  region_match?: MatchFilter
+  sort?: DeclarationSort
+  order?: SortOrder
 }

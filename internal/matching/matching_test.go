@@ -12,6 +12,7 @@ func TestReferenceSnapshotMatchTableDriven(t *testing.T) {
 	cases := []struct {
 		name             string
 		input            Input
+		wantAlcohols     []int64
 		wantDistilleries []int64
 		wantRegions      []int64
 		wantExact        bool
@@ -19,6 +20,7 @@ func TestReferenceSnapshotMatchTableDriven(t *testing.T) {
 		{
 			name:             "exact bilingual names aggregate same IDs",
 			input:            Input{BaseNameKO: "글렌피딕 12", SearchNameEN: "Glenfiddich 12", ABVPercent: &abv40, AgeYears: intPtr(12), Cask: "Sherry Cask"},
+			wantAlcohols:     []int64{1},
 			wantDistilleries: []int64{10},
 			wantRegions:      []int64{100},
 			wantExact:        true,
@@ -26,6 +28,7 @@ func TestReferenceSnapshotMatchTableDriven(t *testing.T) {
 		{
 			name:             "punctuation is a token boundary",
 			input:            Input{BaseNameEN: "Glenfiddich, 12 Years"},
+			wantAlcohols:     []int64{1},
 			wantDistilleries: []int64{10},
 			wantRegions:      []int64{100},
 			wantExact:        true,
@@ -45,13 +48,15 @@ func TestReferenceSnapshotMatchTableDriven(t *testing.T) {
 		{
 			name:             "same alias keeps Ryuka collision ambiguous",
 			input:            Input{BaseNameEN: "Ryuka"},
+			wantAlcohols:     []int64{3, 4},
 			wantDistilleries: []int64{20, 21},
-			wantRegions:      []int64{200, 201},
+			wantRegions:      nil,
 			wantExact:        true,
 		},
 		{
 			name:             "Octomore does not match Tormore",
 			input:            Input{BaseNameEN: "Octomore"},
+			wantAlcohols:     []int64{5},
 			wantDistilleries: []int64{30},
 			wantRegions:      []int64{300},
 			wantExact:        true,
@@ -59,6 +64,7 @@ func TestReferenceSnapshotMatchTableDriven(t *testing.T) {
 		{
 			name:             "Glen Rothes does not match Glenlossie",
 			input:            Input{BaseNameEN: "Glen Rothes"},
+			wantAlcohols:     []int64{7},
 			wantDistilleries: []int64{40},
 			wantRegions:      []int64{400},
 			wantExact:        true,
@@ -75,6 +81,9 @@ func TestReferenceSnapshotMatchTableDriven(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			result := snapshot.Match(test.input)
+			if got := candidateIDs(result.Alcohols); !equalIDs(got, test.wantAlcohols) {
+				t.Fatalf("alcohols = %v, want %v", got, test.wantAlcohols)
+			}
 			if got := candidateIDs(result.Distilleries); !equalIDs(got, test.wantDistilleries) {
 				t.Fatalf("distilleries = %v, want %v", got, test.wantDistilleries)
 			}
@@ -100,6 +109,9 @@ func TestReferenceSnapshotMatchDeterministicTopThree(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := snapshot.Match(Input{BaseNameEN: "Spirit 1 Spirit 2 Spirit 3 Spirit 4 Spirit 5"})
+	if got := candidateIDs(result.Alcohols); !equalIDs(got, []int64{1, 2, 3}) {
+		t.Fatalf("alcohols = %v, want [1 2 3]", got)
+	}
 	if got := candidateIDs(result.Distilleries); !equalIDs(got, []int64{1, 2, 3}) {
 		t.Fatalf("distilleries = %v, want [1 2 3]", got)
 	}
@@ -120,7 +132,7 @@ func TestReferenceSnapshotUsesParentAsWeakRegionEvidence(t *testing.T) {
 		t.Fatalf("regions = %v, want [11 1]", got)
 	}
 	if result.Regions[1].Score >= result.Regions[0].Score {
-		t.Fatalf("parent region score = %d, child score = %d", result.Regions[1].Score, result.Regions[0].Score)
+		t.Fatalf("parent region score = %.2f, child score = %.2f", result.Regions[1].Score, result.Regions[0].Score)
 	}
 }
 

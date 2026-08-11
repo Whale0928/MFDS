@@ -24,18 +24,21 @@ type overviewResponse struct {
 }
 
 type declarationListItem struct {
-	RCNO           string   `json:"rcno"`
-	SourceName     string   `json:"source_name"`
-	NormalizedName string   `json:"normalized_name"`
-	Key1           string   `json:"key_1"`
-	Key2           string   `json:"key_2"`
-	Key3           string   `json:"key_3"`
-	Status         string   `json:"status"`
-	ProcessedAt    string   `json:"processed_at"`
-	ItemName       string   `json:"item_name"`
-	ImporterName   string   `json:"importer_name"`
-	Country        string   `json:"country"`
-	ReasonCodes    []string `json:"reason_codes"`
+	RCNO              string   `json:"rcno"`
+	SourceName        string   `json:"source_name"`
+	NormalizedName    string   `json:"normalized_name"`
+	Key1              string   `json:"key_1"`
+	Key2              string   `json:"key_2"`
+	Key3              string   `json:"key_3"`
+	Status            string   `json:"status"`
+	ProcessedAt       string   `json:"processed_at"`
+	ItemName          string   `json:"item_name"`
+	ImporterName      string   `json:"importer_name"`
+	Country           string   `json:"country"`
+	AlcoholMatched    bool     `json:"alcohol_matched"`
+	DistilleryMatched bool     `json:"distillery_matched"`
+	RegionMatched     bool     `json:"region_matched"`
+	ReasonCodes       []string `json:"reason_codes"`
 }
 type declarationListResponse struct {
 	Declarations []declarationListItem `json:"declarations"`
@@ -45,20 +48,41 @@ type declarationListResponse struct {
 	TotalPages   int                   `json:"total_pages"`
 }
 type declarationDetail struct {
-	RCNO                  string            `json:"rcno"`
-	SourceName            string            `json:"source_name"`
-	SourceNameEnglish     string            `json:"source_name_english"`
-	NormalizedName        string            `json:"normalized_name"`
-	NormalizedNameEnglish string            `json:"normalized_name_english"`
-	Status                string            `json:"status"`
-	ReasonCodes           []string          `json:"reason_codes"`
-	Evidence              []evidenceItem    `json:"evidence"`
-	ProcessedAt           string            `json:"processed_at"`
-	ItemName              string            `json:"item_name"`
-	ImporterName          string            `json:"importer_name"`
-	Country               string            `json:"country"`
-	Fields                map[string]string `json:"fields"`
-	Groups                []detailGroup     `json:"groups"`
+	RCNO                  string                    `json:"rcno"`
+	SourceName            string                    `json:"source_name"`
+	SourceNameEnglish     string                    `json:"source_name_english"`
+	NormalizedName        string                    `json:"normalized_name"`
+	NormalizedNameEnglish string                    `json:"normalized_name_english"`
+	Status                string                    `json:"status"`
+	ReasonCodes           []string                  `json:"reason_codes"`
+	Evidence              []evidenceItem            `json:"evidence"`
+	ProcessedAt           string                    `json:"processed_at"`
+	ItemName              string                    `json:"item_name"`
+	ImporterName          string                    `json:"importer_name"`
+	Country               string                    `json:"country"`
+	Fields                map[string]string         `json:"fields"`
+	Groups                []detailGroup             `json:"groups"`
+	MatchingCandidates    []matchingCandidateDetail `json:"matching_candidates"`
+}
+
+type matchingCandidateDetail struct {
+	TargetType string                   `json:"target_type"`
+	TargetID   int64                    `json:"target_id"`
+	Rank       int                      `json:"rank"`
+	NameKO     string                   `json:"name_ko"`
+	NameEN     string                   `json:"name_en"`
+	Score      float64                  `json:"score"`
+	Evidence   []matchingEvidenceDetail `json:"evidence"`
+}
+
+type matchingEvidenceDetail struct {
+	FeatureCode      string  `json:"feature_code"`
+	Source           string  `json:"source"`
+	InputValue       string  `json:"input_value"`
+	ReferenceValue   string  `json:"reference_value"`
+	RuleCode         string  `json:"rule_code"`
+	Weight           float64 `json:"weight"`
+	UpstreamTargetID int64   `json:"upstream_target_id"`
 }
 
 type detailField struct {

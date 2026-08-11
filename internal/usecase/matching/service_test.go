@@ -12,7 +12,7 @@ func TestService_일반실행_후보를저장하고선택값을다루지않는�
 	// Given
 	distilleryID, regionID := int64(10), int64(20)
 	snapshot, err := domain.NewReferenceSnapshot(
-		[]domain.AlcoholReference{{ID: 1, KorName: "테스트 위스키", EngName: "Test Whisky", DistilleryID: distilleryID, RegionID: regionID}},
+		[]domain.AlcoholReference{{ID: 1, KorName: "테스트 위스키 10년", EngName: "Test Whisky 10yo", Age: "10", ABVPercent: float64Ptr(40), DistilleryID: distilleryID, RegionID: regionID}},
 		[]domain.DistilleryReference{{ID: distilleryID, KorName: "테스트 증류소"}},
 		[]domain.RegionReference{{ID: regionID, KorName: "테스트 리전"}},
 		domain.DefaultMatchingVersion("test-hash"),
@@ -20,7 +20,7 @@ func TestService_일반실행_후보를저장하고선택값을다루지않는�
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &memoryStore{sources: []Source{{DeclarationID: 1, RCNO: "R-1", BaseProductNameKO: "테스트 위스키"}}}
+	store := &memoryStore{sources: []Source{{DeclarationID: 1, RCNO: "R-1", BaseProductNameKO: "테스트 위스키", AgeYears: intPtr(10), ABVPercent: float64Ptr(40)}}}
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	service, err := NewService(store, snapshot, Options{DefaultLimit: 100, Now: func() time.Time { return now }})
 	if err != nil {
@@ -34,13 +34,17 @@ func TestService_일반실행_후보를저장하고선택값을다루지않는�
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if len(store.saved) != 1 || len(store.saved[0].Result.Distilleries) != 1 || len(store.saved[0].Result.Regions) != 1 {
+	if len(store.saved) != 1 || len(store.saved[0].Result.Alcohols) != 1 || len(store.saved[0].Result.Distilleries) != 1 || len(store.saved[0].Result.Regions) != 1 {
 		t.Fatalf("saved = %#v", store.saved)
 	}
-	if store.saved[0].MatchedAt != now || summary.Processed != 1 || summary.DistilleryMatched != 1 || summary.RegionMatched != 1 {
+	if store.saved[0].MatchedAt != now || summary.Processed != 1 || summary.AlcoholMatched != 1 || summary.DistilleryMatched != 1 || summary.RegionMatched != 1 {
 		t.Fatalf("saved=%#v summary=%+v", store.saved[0], summary)
 	}
 }
+
+func intPtr(value int) *int { return &value }
+
+func float64Ptr(value float64) *float64 { return &value }
 
 func TestService_DryRun_결과를저장하지않고전체를강제평가한다(t *testing.T) {
 	// Given

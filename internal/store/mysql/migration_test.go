@@ -93,3 +93,37 @@ func TestMigration00009_원본Alcohol스키마를FK없이복제한다(t *testing
 		}
 	}
 }
+
+func TestMigration00010_알코올상위3개후보컬럼을추가한다(t *testing.T) {
+	contents, err := migrations.FS.ReadFile("00010_add_alcohol_matching_candidates.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(string(contents))
+	for _, required := range []string{"ALCOHOL_CANDIDATE_1_ID", "ALCOHOL_CANDIDATE_2_ID", "ALCOHOL_CANDIDATE_3_ID", "SELECTED_ALCOHOL_ID"} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("00010 must contain %q", required)
+		}
+	}
+}
+
+func TestMigration00011_실행후보근거선택이력을분리해저장한다(t *testing.T) {
+	contents, err := migrations.FS.ReadFile("00011_add_explainable_matching_records.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(string(contents))
+	for _, required := range []string{
+		"CREATE TABLE MATCHING_RUNS", "CREATE TABLE ALCOHOL_MATCH_RECORDS",
+		"CREATE TABLE REFERENCE_MATCH_RECORDS", "CREATE TABLE MATCHING_CANDIDATES",
+		"CREATE TABLE MATCHING_EVIDENCE", "CREATE TABLE MATCHING_SELECTIONS",
+		"CREATE TABLE REFERENCE_ALIASES", "UPSTREAM_TARGET_ID", "MATCHING_RUN_ID",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("00011 must contain %q", required)
+		}
+	}
+	if strings.Contains(sql, "DROP TABLE DECLARATIONS") {
+		t.Fatal("00011 must not drop the declaration ledger")
+	}
+}

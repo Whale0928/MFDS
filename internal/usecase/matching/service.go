@@ -27,6 +27,9 @@ type Source struct {
 	AgeRaw                 string
 	AgeYears               *int
 	CaskCandidate          string
+	EditionName            string
+	AlcoholCategory        string
+	UnitVolumeML           *int
 	ManufactureCountryName string
 }
 
@@ -40,6 +43,7 @@ type Query struct {
 
 // Completion contains only machine-generated candidates. It has no selected IDs.
 type Completion struct {
+	RunID     int64
 	Source    Source
 	Result    domain.MatchResult
 	Version   string
@@ -65,6 +69,7 @@ type Command struct {
 // Summary reports exact processed and candidate coverage counts.
 type Summary struct {
 	Processed         int
+	AlcoholMatched    int
 	DistilleryMatched int
 	RegionMatched     int
 	NoMatch           int
@@ -74,6 +79,7 @@ type Summary struct {
 
 type Options struct {
 	DefaultLimit int
+	RunID        int64
 	Now          func() time.Time
 }
 
@@ -114,23 +120,27 @@ func (s *Service) Execute(ctx context.Context, command Command) (Summary, error)
 			BaseNameKO: source.BaseProductNameKO, BaseNameEN: source.BaseProductNameEN,
 			SearchNameKO: source.NameSearchKeyKO, SearchNameEN: source.NameSearchKeyEN,
 			ABVPercent: source.ABVPercent, Age: source.AgeRaw, AgeYears: source.AgeYears,
-			Cask: source.CaskCandidate, ManufactureCountry: source.ManufactureCountryName,
+			Cask: source.CaskCandidate, Edition: source.EditionName, Category: source.AlcoholCategory,
+			UnitVolumeML: source.UnitVolumeML, ManufactureCountry: source.ManufactureCountryName,
 		})
 		if !command.DryRun {
 			if err := s.store.SaveMatchingResult(ctx, Completion{
-				Source: source, Result: result, Version: query.Version, MatchedAt: s.opts.Now(),
+				RunID: s.opts.RunID, Source: source, Result: result, Version: query.Version, MatchedAt: s.opts.Now(),
 			}); err != nil {
 				return summary, fmt.Errorf("rcno=%s matching 저장 실패: %w", source.RCNO, err)
 			}
 		}
 		summary.Processed++
+		if len(result.Alcohols) > 0 {
+			summary.AlcoholMatched++
+		}
 		if len(result.Distilleries) > 0 {
 			summary.DistilleryMatched++
 		}
 		if len(result.Regions) > 0 {
 			summary.RegionMatched++
 		}
-		if len(result.Distilleries) == 0 && len(result.Regions) == 0 {
+		if len(result.Alcohols) == 0 && len(result.Distilleries) == 0 && len(result.Regions) == 0 {
 			summary.NoMatch++
 		}
 	}

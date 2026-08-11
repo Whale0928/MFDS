@@ -320,9 +320,17 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	assign.set("cask_candidate", nullableString(fields.CaskCandidate))
 	assign.set("distillery_name_ko_candidate", nullableString(fields.DistilleryNameKOCandidate))
 	assign.set("distillery_name_en_candidate", nullableString(fields.DistilleryNameENCandidate))
+	setStoredCandidates(assign, "alcohol", storedNormalizationCandidates(fields.AlcoholCandidates))
 	setStoredCandidates(assign, "distillery", storedNormalizationCandidates(fields.DistilleryCandidates))
 	setStoredCandidates(assign, "region", storedNormalizationCandidates(fields.RegionCandidates))
 	assign.set("matching_version", nullableString(fields.MatchingVersion))
+	assign.set("matching_run_id", nullablePositiveID(fields.MatchingRunID))
+	assign.set("alcohol_match_decision", nullableString(string(fields.MatchingResult.AlcoholDecision.Status)))
+	assign.set("distillery_match_source", nullableString(fields.MatchingResult.DistilleryDecision.Source))
+	assign.set("region_match_source", nullableString(fields.MatchingResult.RegionDecision.Source))
+	assign.setExpression("selected_alcohol_id = COALESCE(selected_alcohol_id, ?)", nullablePositiveID(fields.MatchingResult.AlcoholDecision.SelectedID))
+	assign.setExpression("selected_distillery_id = COALESCE(selected_distillery_id, ?)", nullablePositiveID(fields.MatchingResult.DistilleryDecision.SelectedID))
+	assign.setExpression("selected_region_id = COALESCE(selected_region_id, ?)", nullablePositiveID(fields.MatchingResult.RegionDecision.SelectedID))
 	assign.set("matched_at", completion.NormalizedAt)
 
 	assign.set("manufacture_country_name_ko", nullableString(fields.ManufactureCountryNameKO))
@@ -349,7 +357,12 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		        ELSE 'NOT_REQUIRED'
 		    END`, status)
 
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("normalization 결과 transaction 시작 실패: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `
 		UPDATE declarations
 		SET `+assign.clause()+`
 		WHERE id = ? AND rcno = ? AND source_item_id = ?
@@ -364,13 +377,21 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	if err := requireNormalizationLease(result, "normalization 결과 저장"); err != nil {
 		return err
 	}
+	if fields.MatchingRunID > 0 {
+		if err := saveMatchingRecords(ctx, tx, fields.MatchingRunID, completion.Source.DeclarationID, fields.MatchingResult, completion.NormalizedAt); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("normalization 결과 transaction commit 실패: %w", err)
+	}
 	return nil
 }
 
 func storedNormalizationCandidates(candidates []normalization.ReferenceCandidate) []storedCandidate {
 	stored := make([]storedCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		stored = append(stored, storedCandidate{id: candidate.ID, score: normalizedCandidateScore(candidate.Score)})
+		stored = append(stored, storedCandidate{id: candidate.ID, score: candidate.Score})
 	}
 	return stored
 }
