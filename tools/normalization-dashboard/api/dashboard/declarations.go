@@ -54,7 +54,7 @@ func (s *Server) declarations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, declarationListResponse{Declarations: items, Page: page, PageSize: pageSize, Total: total, TotalPages: pages(total, pageSize)})
 }
 
-const declarationV3SourceSQL = `declaration_details JOIN (SELECT id AS declaration_id, ingredient_percent_raw, ingredient_percent, variant_marker_raw, variant_marker_type, variant_marker_value, alcohol_candidate_1_id, alcohol_candidate_1_score, alcohol_candidate_2_id, alcohol_candidate_2_score, alcohol_candidate_3_id, alcohol_candidate_3_score, selected_alcohol_id, distillery_candidate_1_id, distillery_candidate_1_score, distillery_candidate_2_id, distillery_candidate_2_score, distillery_candidate_3_id, distillery_candidate_3_score, selected_distillery_id, region_candidate_1_id, region_candidate_1_score, region_candidate_2_id, region_candidate_2_score, region_candidate_3_id, region_candidate_3_score, selected_region_id, matching_version, matching_run_id, alcohol_match_decision, distillery_match_source, region_match_source, matched_at FROM declarations) AS declaration_v3 ON declaration_v3.declaration_id = declaration_details.id`
+const declarationV3SourceSQL = `mfds_declaration_details JOIN (SELECT id AS declaration_id, ingredient_percent_raw, ingredient_percent, variant_marker_raw, variant_marker_type, variant_marker_value, alcohol_candidate_1_id, alcohol_candidate_1_score, alcohol_candidate_2_id, alcohol_candidate_2_score, alcohol_candidate_3_id, alcohol_candidate_3_score, selected_alcohol_id, distillery_candidate_1_id, distillery_candidate_1_score, distillery_candidate_2_id, distillery_candidate_2_score, distillery_candidate_3_id, distillery_candidate_3_score, selected_distillery_id, region_candidate_1_id, region_candidate_1_score, region_candidate_2_id, region_candidate_2_score, region_candidate_3_id, region_candidate_3_score, selected_region_id, matching_version, matching_run_id, alcohol_match_decision, distillery_match_source, region_match_source, matched_at FROM mfds_declarations) AS declaration_v3 ON declaration_v3.declaration_id = mfds_declaration_details.id`
 
 const declarationMatchingSourceSQL = declarationV3SourceSQL + `
 LEFT JOIN alcohols AS alcohol_candidate_1 ON alcohol_candidate_1.id = declaration_v3.alcohol_candidate_1_id
@@ -233,9 +233,9 @@ func (s *Server) matchingCandidateDetails(r *http.Request, rcno string, runID in
 		       COALESCE(me.input_value, ''), COALESCE(me.reference_value, ''),
 		       COALESCE(me.rule_code, ''), COALESCE(me.weight, 0),
 		       COALESCE(me.upstream_target_id, 0)
-		FROM matching_candidates AS mc
-		JOIN declarations AS d ON d.id = mc.declaration_id
-		LEFT JOIN matching_evidence AS me ON me.candidate_id = mc.id
+		FROM mfds_matching_candidates AS mc
+		JOIN mfds_declarations AS d ON d.id = mc.declaration_id
+		LEFT JOIN mfds_matching_evidence AS me ON me.candidate_id = mc.id
 		WHERE d.rcno = ? AND mc.run_id = ?
 		ORDER BY FIELD(mc.target_type, 'ALCOHOL', 'DISTILLERY', 'REGION'), mc.rank_no, me.id
 	`, rcno, runID)

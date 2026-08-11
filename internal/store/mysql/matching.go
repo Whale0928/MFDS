@@ -135,7 +135,7 @@ func (s *Store) loadRegionReferences(ctx context.Context) ([]domain.RegionRefere
 func (s *Store) loadReferenceAliases(ctx context.Context) ([]domain.ReferenceAlias, []string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT entity_type, entity_id, alias_norm, language, source
-		FROM reference_aliases
+		FROM mfds_reference_aliases
 		ORDER BY entity_type, entity_id, alias_norm, language
 	`)
 	if err != nil {
@@ -167,7 +167,7 @@ func (s *Store) ListMatchingSources(ctx context.Context, query usecase.Query) ([
 			       abv_percent, COALESCE(age_raw, ''), age_years, COALESCE(cask_candidate, ''),
 			       unit_volume_ml, COALESCE(edition_name, ''), COALESCE(alcohol_category_en, ''),
 			       COALESCE(manufacture_country_name_en, '')
-		FROM declarations
+		FROM mfds_declarations
 		WHERE normalization_status IN ('NORMALIZED', 'PARTIAL', 'REVIEW_REQUIRED', 'UNPARSED')
 		  AND normalized_at IS NOT NULL
 		  AND (? = '' OR rcno = ?)
@@ -232,7 +232,7 @@ func (s *Store) SaveMatchingResult(ctx context.Context, completion usecase.Compl
 	}
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `
-			UPDATE declarations
+			UPDATE mfds_declarations
 			SET `+assign.clause()+`,
 			    matching_run_id = ?, alcohol_match_decision = ?,
 			    distillery_match_source = ?, region_match_source = ?,
@@ -270,7 +270,7 @@ func (s *Store) MatchingRemaining(ctx context.Context, version string) (int, err
 	var remaining int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM declarations
+		FROM mfds_declarations
 		WHERE normalization_status IN ('NORMALIZED', 'PARTIAL', 'REVIEW_REQUIRED', 'UNPARSED')
 		  AND normalized_at IS NOT NULL
 		  AND COALESCE(matching_version, '') <> ?

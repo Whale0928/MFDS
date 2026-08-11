@@ -18,7 +18,7 @@ func (s *Store) StartWebListJob(
 ) (record weblist.JobStartRecord, err error) {
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, `
-			INSERT INTO jobs (
+			INSERT INTO mfds_jobs (
 				job_type, requested_from_date, requested_to_date, status,
 				config_json, page_size, total_tasks, started_at
 			) VALUES ('BACKFILL', ?, ?, 'CREATED', ?, ?, DATEDIFF(?, ?) + 1, ?)
@@ -34,7 +34,7 @@ func (s *Store) StartWebListJob(
 		record.RunID = uint64(id)
 		for date := params.FromDate; !date.After(params.ToDate); date = date.AddDate(0, 0, 1) {
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO tasks (job_id, process_date, status)
+				INSERT INTO mfds_tasks (job_id, process_date, status)
 				VALUES (?, ?, 'PENDING')
 			`, record.RunID, date); err != nil {
 				return fmt.Errorf("날짜 Task %s 생성 실패: %w", date.Format(time.DateOnly), err)
@@ -52,8 +52,8 @@ func (s *Store) ClaimTask(
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		row := tx.QueryRowContext(ctx, `
 			SELECT t.id, t.process_date, t.attempts
-			FROM tasks AS t
-			JOIN jobs AS j ON j.id = t.job_id
+			FROM mfds_tasks AS t
+			JOIN mfds_jobs AS j ON j.id = t.job_id
 			WHERE t.job_id = ?
 			  AND j.status IN ('CREATED', 'RUNNING')
 			  AND j.cancel_requested_at IS NULL
@@ -75,7 +75,7 @@ func (s *Store) ClaimTask(
 			return fmt.Errorf("날짜 Task claim 조회 실패: %w", scanErr)
 		}
 		result, updateErr := tx.ExecContext(ctx, `
-			UPDATE tasks
+			UPDATE mfds_tasks
 			SET status = 'LEASED', attempts = attempts + 1,
 			    lease_owner = ?, lease_until = ?, next_attempt_at = NULL,
 			    last_error = NULL, started_at = COALESCE(started_at, ?)
@@ -88,7 +88,7 @@ func (s *Store) ClaimTask(
 			return err
 		}
 		if _, updateErr = tx.ExecContext(ctx, `
-			UPDATE jobs SET status = 'RUNNING', started_at = COALESCE(started_at, ?)
+			UPDATE mfds_jobs SET status = 'RUNNING', started_at = COALESCE(started_at, ?)
 			WHERE id = ? AND status = 'CREATED'
 		`, params.Now, params.RunID); updateErr != nil {
 			return fmt.Errorf("job RUNNING 전이 실패: %w", updateErr)
@@ -109,7 +109,7 @@ func (s *Store) RenewTask(
 	leaseUntil time.Time,
 ) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE tasks SET lease_until = ?
+		UPDATE mfds_tasks SET lease_until = ?
 		WHERE id = ? AND job_id = ? AND status = 'LEASED'
 		  AND lease_owner = ? AND attempts = ? AND lease_until >= NOW(6)
 	`, leaseUntil, task.TaskID, task.RunID, task.Owner, task.Attempt)
@@ -131,7 +131,7 @@ func (s *Store) CommitFetch(ctx context.Context, params weblist.CommitFetchParam
 		}
 		for _, row := range params.Page.Rows {
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO items (
+				INSERT INTO mfds_items (
 					job_id, task_id, fetch_id, row_no, rcno,
 					queried_item_code, queried_item_name, product_division_name,
 					importer_name, product_name_ko, product_name_en, item_name,
@@ -190,7 +190,7 @@ func (s *Store) LoadTaskAttemptEvidence(
 	pageRows, err := s.db.QueryContext(ctx, `
 		SELECT attempt_no, item_code, item_name, page_no, status,
 		       COALESCE(total_snapshot, 0), COALESCE(parsed_item_count, 0)
-		FROM fetches
+		FROM mfds_fetches
 		WHERE task_id = ? AND job_id = ? AND attempt_no <= ?
 		ORDER BY attempt_no, item_code, page_no, id
 	`, task.TaskID, task.RunID, task.Attempt)
@@ -232,8 +232,8 @@ func (s *Store) LoadTaskAttemptEvidence(
 
 	itemRows, err := s.db.QueryContext(ctx, `
 		SELECT f.attempt_no, f.item_code, f.item_name, i.rcno
-		FROM items AS i
-		JOIN fetches AS f ON f.id = i.fetch_id
+		FROM mfds_items AS i
+		JOIN mfds_fetches AS f ON f.id = i.fetch_id
 		WHERE i.task_id = ? AND i.job_id = ? AND f.attempt_no <= ?
 		ORDER BY f.attempt_no, f.item_code, i.rcno, i.id
 	`, task.TaskID, task.RunID, task.Attempt)
@@ -276,7 +276,7 @@ func insertFetch(
 		startedAt = time.Now()
 	}
 	result, err := tx.ExecContext(ctx, `
-		INSERT INTO fetches (
+		INSERT INTO mfds_fetches (
 			job_id, task_id, item_code, item_name, page_no, source_kind,
 			request_key_sha256, request_method, request_url, request_query_json,
 			request_headers_json, attempt_no, started_at, finished_at, duration_ms,
@@ -324,7 +324,7 @@ func (s *Store) CompleteTask(ctx context.Context, task weblist.DateTask) error {
 			return err
 		}
 		result, err := tx.ExecContext(ctx, `
-			UPDATE tasks
+			UPDATE mfds_tasks
 			SET status = 'DONE', lease_owner = NULL, lease_until = NULL,
 			    next_attempt_at = NULL, finished_at = NOW(6), last_error = NULL
 			WHERE id = ? AND job_id = ? AND status = 'LEASED'
@@ -345,7 +345,7 @@ func (s *Store) FailTask(ctx context.Context, params weblist.FailTaskParams) err
 		nextAttempt = params.NextAttemptAt
 	}
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE tasks
+		UPDATE mfds_tasks
 		SET status = ?, lease_owner = NULL, lease_until = NULL,
 		    next_attempt_at = ?, last_error = ?,
 		    finished_at = CASE WHEN ? = 'FAILED' THEN NOW(6) ELSE NULL END
@@ -361,7 +361,7 @@ func (s *Store) FailTask(ctx context.Context, params weblist.FailTaskParams) err
 
 func (s *Store) RequestCancellation(ctx context.Context, jobID uint64) error {
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE jobs SET cancel_requested_at = COALESCE(cancel_requested_at, NOW(6))
+		UPDATE mfds_jobs SET cancel_requested_at = COALESCE(cancel_requested_at, NOW(6))
 		WHERE id = ? AND status IN ('CREATED', 'RUNNING')
 	`, jobID)
 	if err != nil {
@@ -378,7 +378,7 @@ func (s *Store) FinalizeJob(
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		var cancelRequested sql.NullTime
 		if err := tx.QueryRowContext(ctx, `
-			SELECT status, cancel_requested_at FROM jobs WHERE id = ? FOR UPDATE
+			SELECT status, cancel_requested_at FROM mfds_jobs WHERE id = ? FOR UPDATE
 		`, jobID).Scan(&status, &cancelRequested); err != nil {
 			return fmt.Errorf("job finalization lock 실패: %w", err)
 		}
@@ -388,7 +388,7 @@ func (s *Store) FinalizeJob(
 		}
 		if cancelRequested.Valid {
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE tasks SET status = 'FAILED', last_error = 'CANCELLED',
+				UPDATE mfds_tasks SET status = 'FAILED', last_error = 'CANCELLED',
 				    next_attempt_at = NULL, lease_owner = NULL, lease_until = NULL,
 				    finished_at = NOW(6)
 				WHERE job_id = ? AND status IN ('PENDING', 'RETRY_WAIT')
@@ -401,7 +401,7 @@ func (s *Store) FinalizeJob(
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(*), SUM(status = 'DONE'), SUM(status = 'FAILED'),
 			       SUM(status IN ('PENDING', 'LEASED', 'RETRY_WAIT')), MAX(last_error)
-			FROM tasks WHERE job_id = ?
+			FROM mfds_tasks WHERE job_id = ?
 		`, jobID).Scan(&total, &done, &failed, &active, &lastError); err != nil {
 			return fmt.Errorf("job task 집계 실패: %w", err)
 		}
@@ -419,7 +419,7 @@ func (s *Store) FinalizeJob(
 			return err
 		}
 		result, err := tx.ExecContext(ctx, `
-			UPDATE jobs SET status = ?, total_tasks = ?, completed_tasks = ?,
+			UPDATE mfds_jobs SET status = ?, total_tasks = ?, completed_tasks = ?,
 			    last_error = ?, finished_at = ?
 			WHERE id = ? AND status IN ('CREATED', 'RUNNING')
 		`, status, total, done, lastError, finishedAt, jobID)
@@ -446,16 +446,16 @@ func (s *Store) LoadJobResult(
 		       j.fetched_requests, j.parsed_rows,
 		       (
 		           SELECT COUNT(DISTINCT i.rcno)
-		           FROM items AS i
-		           JOIN fetches AS f ON f.id = i.fetch_id
-		           JOIN tasks AS accepted_task ON accepted_task.id = i.task_id
+		           FROM mfds_items AS i
+		           JOIN mfds_fetches AS f ON f.id = i.fetch_id
+		           JOIN mfds_tasks AS accepted_task ON accepted_task.id = i.task_id
 		           WHERE i.job_id = j.id
 		             AND accepted_task.status = 'DONE'
 		             AND f.attempt_no = accepted_task.attempts
 		       ),
 		       j.new_rcno_count
-		FROM jobs AS j
-		LEFT JOIN tasks AS t ON t.job_id = j.id
+		FROM mfds_jobs AS j
+		LEFT JOIN mfds_tasks AS t ON t.job_id = j.id
 		WHERE j.id = ?
 		GROUP BY j.id
 	`, jobID).Scan(&result.RunID, &result.Status, &result.TotalPartitions,
@@ -468,7 +468,7 @@ func (s *Store) LoadJobResult(
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, process_date, status, fetched_requests, parsed_rows,
 		       unique_rcno_count, new_rcno_count
-		FROM tasks WHERE job_id = ? ORDER BY process_date, id
+		FROM mfds_tasks WHERE job_id = ? ORDER BY process_date, id
 	`, jobID)
 	if err != nil {
 		return result, fmt.Errorf("job task 결과 조회 실패: %w", err)
@@ -492,7 +492,7 @@ func (s *Store) LoadJobResult(
 func lockTaskLease(ctx context.Context, tx *sql.Tx, task weblist.DateTask) error {
 	var exists uint8
 	err := tx.QueryRowContext(ctx, `
-		SELECT 1 FROM tasks
+		SELECT 1 FROM mfds_tasks
 		WHERE id = ? AND job_id = ? AND status = 'LEASED'
 		  AND lease_owner = ? AND attempts = ? AND lease_until >= NOW(6)
 		FOR UPDATE
@@ -508,28 +508,28 @@ func lockTaskLease(ctx context.Context, tx *sql.Tx, task weblist.DateTask) error
 
 func refreshTaskCounters(ctx context.Context, tx *sql.Tx, taskID uint64) error {
 	_, err := tx.ExecContext(ctx, `
-		UPDATE tasks AS t
-		SET fetched_requests = (SELECT COUNT(*) FROM fetches f WHERE f.task_id = t.id),
+		UPDATE mfds_tasks AS t
+		SET fetched_requests = (SELECT COUNT(*) FROM mfds_fetches f WHERE f.task_id = t.id),
 		    parsed_rows = (
 		        SELECT COUNT(*)
-		        FROM items i
-		        JOIN fetches f ON f.id = i.fetch_id
+		        FROM mfds_items i
+		        JOIN mfds_fetches f ON f.id = i.fetch_id
 		        WHERE i.task_id = t.id AND f.attempt_no = t.attempts
 		    ),
 		    unique_rcno_count = (
 		        SELECT COUNT(DISTINCT i.rcno)
-		        FROM items i
-		        JOIN fetches f ON f.id = i.fetch_id
+		        FROM mfds_items i
+		        JOIN mfds_fetches f ON f.id = i.fetch_id
 		        WHERE i.task_id = t.id AND f.attempt_no = t.attempts
 		    ),
 		    new_rcno_count = (
 		        SELECT COUNT(DISTINCT i.rcno)
-		        FROM items i
-		        JOIN fetches f ON f.id = i.fetch_id
+		        FROM mfds_items i
+		        JOIN mfds_fetches f ON f.id = i.fetch_id
 		        WHERE i.task_id = t.id AND f.attempt_no = t.attempts
 		          AND NOT EXISTS (
 		              SELECT 1
-		              FROM items earlier
+		              FROM mfds_items earlier
 		              WHERE earlier.rcno = i.rcno
 		                AND earlier.id < i.id
 		                AND earlier.task_id <> t.id
@@ -545,32 +545,32 @@ func refreshTaskCounters(ctx context.Context, tx *sql.Tx, taskID uint64) error {
 
 func refreshJobCounters(ctx context.Context, tx *sql.Tx, jobID uint64) error {
 	_, err := tx.ExecContext(ctx, `
-		UPDATE jobs AS j
-		SET total_tasks = (SELECT COUNT(*) FROM tasks t WHERE t.job_id = j.id),
-		    completed_tasks = (SELECT COUNT(*) FROM tasks t WHERE t.job_id = j.id AND t.status = 'DONE'),
-		    fetched_requests = (SELECT COUNT(*) FROM fetches f WHERE f.job_id = j.id),
+		UPDATE mfds_jobs AS j
+		SET total_tasks = (SELECT COUNT(*) FROM mfds_tasks t WHERE t.job_id = j.id),
+		    completed_tasks = (SELECT COUNT(*) FROM mfds_tasks t WHERE t.job_id = j.id AND t.status = 'DONE'),
+		    fetched_requests = (SELECT COUNT(*) FROM mfds_fetches f WHERE f.job_id = j.id),
 		    parsed_rows = (
 		        SELECT COUNT(*)
-		        FROM items i
-		        JOIN fetches f ON f.id = i.fetch_id
-		        JOIN tasks t ON t.id = i.task_id
+		        FROM mfds_items i
+		        JOIN mfds_fetches f ON f.id = i.fetch_id
+		        JOIN mfds_tasks t ON t.id = i.task_id
 		        WHERE i.job_id = j.id
 		          AND t.status = 'DONE'
 		          AND f.attempt_no = t.attempts
 		    ),
 		    new_rcno_count = (
 		        SELECT COUNT(DISTINCT i.rcno)
-		        FROM items i
-		        JOIN fetches f ON f.id = i.fetch_id
-		        JOIN tasks t ON t.id = i.task_id
+		        FROM mfds_items i
+		        JOIN mfds_fetches f ON f.id = i.fetch_id
+		        JOIN mfds_tasks t ON t.id = i.task_id
 		        WHERE i.job_id = j.id
 		          AND t.status = 'DONE'
 		          AND f.attempt_no = t.attempts
 		          AND NOT EXISTS (
 		              SELECT 1
-		              FROM items earlier
-		              JOIN fetches earlier_fetch ON earlier_fetch.id = earlier.fetch_id
-		              JOIN tasks earlier_task ON earlier_task.id = earlier.task_id
+		              FROM mfds_items earlier
+		              JOIN mfds_fetches earlier_fetch ON earlier_fetch.id = earlier.fetch_id
+		              JOIN mfds_tasks earlier_task ON earlier_task.id = earlier.task_id
 		              WHERE earlier.rcno = i.rcno
 		                AND earlier.id < i.id
 		                AND earlier_task.status = 'DONE'

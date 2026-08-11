@@ -90,7 +90,7 @@ func TestDeclarations_usesReadOnlyPaginationAndSnakeCase(t *testing.T) {
 				return nil, fmt.Errorf("count args = %d", len(args))
 			}
 			return &fakeRows{values: [][]any{{int64(1)}}}, nil
-		case strings.Contains(query, "FROM declaration_details"):
+		case strings.Contains(query, "FROM mfds_declaration_details"):
 			if len(args) != 6 {
 				return nil, fmt.Errorf("list args = %d", len(args))
 			}
@@ -180,7 +180,7 @@ func TestDeclarations_허용하지않은매칭필터와정렬값을거부한다(
 
 func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
 	queryer := &fakeQueryer{respond: func(query string, _ []any) (RowIterator, error) {
-		if !strings.Contains(query, "FROM declaration_details") || !strings.Contains(query, "WHERE rcno") {
+		if !strings.Contains(query, "FROM mfds_declaration_details") || !strings.Contains(query, "WHERE rcno") {
 			return nil, fmt.Errorf("unexpected query")
 		}
 		if strings.Contains(query, "alcohol_category_ko") {
@@ -303,7 +303,7 @@ func TestDashboardV3Queries_기존View를교체하지않고BaseTable컬럼을조
 		"coverage": coverageSQL,
 	} {
 		if !strings.Contains(query, declarationV3SourceSQL) {
-			t.Fatalf("%s query does not join declarations v3 columns: %s", name, query)
+			t.Fatalf("%s query does not join mfds_declarations v3 columns: %s", name, query)
 		}
 	}
 	for _, column := range []string{"ingredient_percent_raw", "ingredient_percent", "variant_marker_raw", "variant_marker_type", "variant_marker_value", "alcohol_candidate_1_id", "alcohol_candidate_3_score", "selected_alcohol_id", "distillery_candidate_1_id", "distillery_candidate_3_score", "selected_distillery_id", "region_candidate_1_id", "region_candidate_3_score", "selected_region_id", "matching_version", "matching_run_id", "alcohol_match_decision", "distillery_match_source", "region_match_source", "matched_at"} {

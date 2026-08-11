@@ -10,15 +10,15 @@
 ## 데이터 구조
 
 ```text
-jobs → tasks → fetches → items → declarations
+mfds_jobs → mfds_tasks → mfds_fetches → mfds_items → mfds_declarations
 ```
 
-- `jobs`: 요청한 수집 기간과 집계 상태
-- `tasks`: 날짜별 재시도 단위
-- `fetches`: HTTP 요청 정보와 압축 원문 응답
-- `items`: RCNO로 대조하는 append-only 관찰 원장
-- `declarations`: RCNO당 1행인 최신 원본 참조와 정제 결과
-- `declaration_details`: 원본 관찰과 정제 결과를 함께 읽는 View
+- `mfds_jobs`: 요청한 수집 기간과 집계 상태
+- `mfds_tasks`: 날짜별 재시도 단위
+- `mfds_fetches`: HTTP 요청 정보와 압축 원문 응답
+- `mfds_items`: RCNO로 대조하는 append-only 관찰 원장
+- `mfds_declarations`: RCNO당 1행인 최신 원본 참조와 정제 결과
+- `mfds_declaration_details`: 원본 관찰과 정제 결과를 함께 읽는 View
 
 다중 페이지 결과는 다시 수집한 RCNO 집합이 일치할 때 확정합니다. 반복 관찰은
 이후 정규화를 위해 원장에 유지합니다.
@@ -56,7 +56,7 @@ task run -- match --all
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
 재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
 정제 상태는 `PENDING`, `STALE`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`,
-`UNPARSED`로 구분합니다. 원문 `items`는 수정하거나 삭제하지 않습니다.
+`UNPARSED`로 구분합니다. 원문 `mfds_items`는 수정하거나 삭제하지 않습니다.
 시스템 오류로 최대 재시도 횟수를 소진한 RCNO는 원인을 해결한 뒤
 `normalize --rcno RCNO`로 강제 재정제합니다.
 

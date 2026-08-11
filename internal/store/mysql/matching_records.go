@@ -26,7 +26,7 @@ func (s *Store) StartMatchingRun(
 		return 0, fmt.Errorf("matching 가중치 JSON 인코딩 실패: %w", err)
 	}
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO matching_runs (
+		INSERT INTO mfds_matching_runs (
 			matcher_version, reference_hash, normalization_version, scope, status,
 			weights_json, stats_json, started_at
 		) VALUES (?, ?, NULLIF(?, ''), ?, 'RUNNING', ?, JSON_OBJECT(), NOW(6))
@@ -54,7 +54,7 @@ func (s *Store) FinishMatchingRun(ctx context.Context, runID int64, stats any, r
 		status = "FAILED"
 	}
 	_, err = s.db.ExecContext(ctx, `
-		UPDATE matching_runs
+		UPDATE mfds_matching_runs
 		SET status = ?, stats_json = ?, finished_at = NOW(6)
 		WHERE id = ? AND status = 'RUNNING'
 	`, status, encoded, runID)
@@ -77,7 +77,7 @@ func saveMatchingRecords(
 	}
 	topAlcoholID, topAlcoholScore := topCandidate(result.Alcohols)
 	_, err := executor.ExecContext(ctx, `
-		INSERT INTO alcohol_match_records (
+		INSERT INTO mfds_alcohol_match_records (
 			run_id, declaration_id, decision, stop_reason, top_alcohol_id, top_score,
 			margin_score, competitive_count, consensus_distillery_id, consensus_region_id, matched_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -98,7 +98,7 @@ func saveMatchingRecords(
 	topDistilleryID, topDistilleryScore := topCandidate(result.Distilleries)
 	topRegionID, topRegionScore := topCandidate(result.Regions)
 	_, err = executor.ExecContext(ctx, `
-		INSERT INTO reference_match_records (
+		INSERT INTO mfds_reference_match_records (
 			run_id, declaration_id, triggered_by,
 			distillery_decision, distillery_source, top_distillery_id, distillery_score, selected_distillery_id,
 			region_decision, region_source, top_region_id, region_score, selected_region_id, matched_at
@@ -153,7 +153,7 @@ func saveMatchingRecords(
 			continue
 		}
 		_, err = executor.ExecContext(ctx, `
-			INSERT INTO matching_selections (
+			INSERT INTO mfds_matching_selections (
 				run_id, declaration_id, target_type, target_id, action,
 				selection_source, reason_code, selected_by, selected_at
 			) VALUES (?, ?, ?, ?, 'SELECT', 'AUTO', ?, 'matching-v4', ?)
@@ -177,7 +177,7 @@ func saveMatchingCandidate(
 	candidate domain.Candidate,
 ) (int64, error) {
 	result, err := executor.ExecContext(ctx, `
-		INSERT INTO matching_candidates (
+		INSERT INTO mfds_matching_candidates (
 			run_id, declaration_id, stage, target_type, target_id, rank_no,
 			raw_score, evidence_strength, target_name_ko, target_name_en
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
@@ -199,7 +199,7 @@ func saveMatchingCandidate(
 
 func saveMatchingEvidence(ctx context.Context, executor matchingRecordExecutor, candidateID int64, evidence domain.Evidence) error {
 	_, err := executor.ExecContext(ctx, `
-		INSERT INTO matching_evidence (
+		INSERT INTO mfds_matching_evidence (
 			candidate_id, feature_code, evidence_source, input_value, reference_value,
 			rule_code, weight, upstream_target_id
 		) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)

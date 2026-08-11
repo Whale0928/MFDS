@@ -4,21 +4,21 @@
 
 Go CLI that collects the public MFDS imported-liquor ledger and derives
 non-destructive normalization results per RCNO. A collection task represents
-one date and sequentially fetches whisky, brandy, general distilled spirits,
+one date and sequentially mfds_fetches whisky, brandy, general distilled spirits,
 and liqueur, including every additional result page.
 
 ## Data model
 
 ```text
-jobs → tasks → fetches → items → declarations
+mfds_jobs → mfds_tasks → mfds_fetches → mfds_items → mfds_declarations
 ```
 
-- `jobs`: requested collection range and aggregate status
-- `tasks`: one retryable unit per date
-- `fetches`: HTTP request metadata and compressed raw response
-- `items`: append-only observations reconciled by RCNO
-- `declarations`: one latest source reference and normalization result per RCNO
-- `declaration_details`: read view joining source observations and derived values
+- `mfds_jobs`: requested collection range and aggregate status
+- `mfds_tasks`: one retryable unit per date
+- `mfds_fetches`: HTTP request metadata and compressed raw response
+- `mfds_items`: append-only observations reconciled by RCNO
+- `mfds_declarations`: one latest source reference and normalization result per RCNO
+- `mfds_declaration_details`: read view joining source observations and derived values
 
 Multi-page results are collected again and accepted only after their RCNO sets
 match. Repeated observations remain in the ledger for later normalization.
@@ -56,14 +56,14 @@ task run -- match --all
 `normalize` processes 100 rows by default. `--rcno` force-normalizes one row
 regardless of its current state, while `--dry-run` changes no ledger row,
 declaration, lease, or timestamp. States are `PENDING`, `STALE`, `NORMALIZED`,
-`PARTIAL`, `REVIEW_REQUIRED`, and `UNPARSED`. Source `items` are never updated
+`PARTIAL`, `REVIEW_REQUIRED`, and `UNPARSED`. Source `mfds_items` are never updated
 or deleted.
 After fixing a system error, recover an RCNO that exhausted its retry limit with
 `normalize --rcno RCNO`.
 
 MFDS reads the canonical `alcohols`, `distilleries`, and `regions` tables from
 the same BottleNote database. Primary normalization writes ranked distillery
-and region candidates, while `match` backfills already-normalized declarations.
+and region candidates, while `match` backfills already-normalized mfds_declarations.
 Both paths preserve administrator-selected IDs.
 
 ## Configuration

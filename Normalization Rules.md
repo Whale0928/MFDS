@@ -526,23 +526,23 @@ PARENTHESIS_SEMANTIC_TEXT
 
 ### 8.1 테이블 역할
 
-`declarations`는 RCNO별 정제 결과를 관리하는 현재 상태 테이블이다.
+`mfds_declarations`는 RCNO별 정제 결과를 관리하는 현재 상태 테이블이다.
 
-- `items`: 같은 RCNO의 반복 관찰을 모두 보존하는 불변 원장 이력
-- `declarations`: RCNO당 1행인 원본 참조와 정제 결과
-- `source_item_id`: 정제 근거로 선택한 최신 `items.id`
-- `declaration_details`: 원본과 정제 결과를 함께 보여주는 조회 View
+- `mfds_items`: 같은 RCNO의 반복 관찰을 모두 보존하는 불변 원장 이력
+- `mfds_declarations`: RCNO당 1행인 원본 참조와 정제 결과
+- `source_item_id`: 정제 근거로 선택한 최신 `mfds_items.id`
+- `mfds_declaration_details`: 원본과 정제 결과를 함께 보여주는 조회 View
 - 정제 컬럼: 소스 값에서 파생한 제품·용량·도수·숙성·LOT 정보
 - 검토 컬럼: 자동 정제 상태와 휴먼 리뷰 결과
 
-원본 값은 `declarations`에 복제하지 않는다. 일반 조회에서는 `declaration_details` View를 사용하고, 원본 관찰 이력 전체가 필요할 때만 `items`를 직접 조회한다.
+원본 값은 `mfds_declarations`에 복제하지 않는다. 일반 조회에서는 `mfds_declaration_details` View를 사용하고, 원본 관찰 이력 전체가 필요할 때만 `mfds_items`를 직접 조회한다.
 
-FK는 두지 않는다. `source_item_id`는 추적용 논리 참조이며 RCNO 유일성만 DB에서 강제한다. `items`는 불변 원장이므로 참조된 행을 수정하거나 삭제하지 않는다.
+FK는 두지 않는다. `source_item_id`는 추적용 논리 참조이며 RCNO 유일성만 DB에서 강제한다. `mfds_items`는 불변 원장이므로 참조된 행을 수정하거나 삭제하지 않는다.
 
 ### 8.2 DDL
 
 ```sql
-CREATE TABLE declarations
+CREATE TABLE mfds_declarations
 (
     id                                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     rcno                              VARCHAR(32) NOT NULL,
@@ -641,7 +641,7 @@ CREATE TABLE declarations
     KEY idx_declarations_country (manufacture_country_alpha2, export_country_alpha2)
 ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC COMMENT='RCNO별 원본 참조와 비파괴 정제 결과';
 
-CREATE VIEW declaration_details AS
+CREATE VIEW mfds_declaration_details AS
 SELECT d.*,
        i.job_id                        AS source_job_id,
        i.task_id                       AS source_task_id,
@@ -668,18 +668,18 @@ SELECT d.*,
        i.parser_version                AS source_parser_version,
        i.parser_warning                AS source_parser_warning,
        i.observed_at                   AS source_observed_at
-FROM declarations AS d
-JOIN items AS i ON i.id = d.source_item_id;
+FROM mfds_declarations AS d
+JOIN mfds_items AS i ON i.id = d.source_item_id;
 ```
 
 ### 8.3 컬럼 계약
 
 #### 원본 참조 컬럼
 
-- `source_item_id`는 RCNO의 최신 관찰 `items.id`다.
-- `source_item_id`가 가리키는 `items.rcno`는 `declarations.rcno`와 같아야 한다.
-- 원본 컬럼은 `declaration_details` View에서 `source_*` 이름으로 노출한다.
-- View의 원본 HTML과 해시는 `items` 값을 그대로 보여주며 복제하거나 재생성하지 않는다.
+- `source_item_id`는 RCNO의 최신 관찰 `mfds_items.id`다.
+- `source_item_id`가 가리키는 `mfds_items.rcno`는 `mfds_declarations.rcno`와 같아야 한다.
+- 원본 컬럼은 `mfds_declaration_details` View에서 `source_*` 이름으로 노출한다.
+- View의 원본 HTML과 해시는 `mfds_items` 값을 그대로 보여주며 복제하거나 재생성하지 않는다.
 - FK가 없으므로 애플리케이션과 검증 쿼리에서 고아 참조가 0건인지 확인한다.
 
 #### 제품 식별 컬럼
@@ -715,12 +715,12 @@ JOIN items AS i ON i.id = d.source_item_id;
 
 - `review_status`는 `NOT_REQUIRED`, `PENDING`, `APPROVED`, `REJECTED`를 사용한다.
 - 정제 결과가 `REVIEW_REQUIRED`이면 `review_status`를 `PENDING`으로 변경한다.
-- 리뷰는 정제값을 덮어쓸 수 있지만 `source_item_id`와 `items` 원본은 수정하지 않는다.
+- 리뷰는 정제값을 덮어쓸 수 있지만 `source_item_id`와 `mfds_items` 원본은 수정하지 않는다.
 - 사람이 수정한 값은 `reviewed_by`, `reviewed_at`, `review_note`로 근거를 남긴다.
 
 ### 8.4 생성과 갱신 규칙
 
-초기 생성은 `items`에서 RCNO별 최신 1행을 선택하여 수행한다.
+초기 생성은 `mfds_items`에서 RCNO별 최신 1행을 선택하여 수행한다.
 
 ```sql
 ROW_NUMBER() OVER (
@@ -731,12 +731,12 @@ ROW_NUMBER() OVER (
 
 신규 관찰 처리 규칙은 다음과 같다.
 
-1. RCNO가 없으면 최신 `items.id`를 `source_item_id`로 지정하고 `UNPARSED`로 생성한다.
+1. RCNO가 없으면 최신 `mfds_items.id`를 `source_item_id`로 지정하고 `UNPARSED`로 생성한다.
 2. RCNO가 있고 의미 해시가 같으면 `source_item_id`만 최신 관찰 행으로 갱신한다.
 3. RCNO가 있고 의미 해시가 다르면 `source_item_id`를 최신 관찰 행으로 바꾸고 `normalization_status = 'STALE'`로 변경한다.
 4. 정제 작업은 `UNPARSED` 또는 `STALE` 행을 처리한다.
 5. 자동 확정할 수 없는 토큰은 원문을 유지하고 `REVIEW_REQUIRED`, `review_status = 'PENDING'`, 사유를 기록한다.
-6. 어떤 경우에도 `items` 이력을 삭제하거나 갱신하지 않는다.
+6. 어떤 경우에도 `mfds_items` 이력을 삭제하거나 갱신하지 않는다.
 
 `mfds-normalization-v3` 전환 data migration은 `mfds-normalization-v2` 결과만 `STALE`로 바꾸고 claim 필드를 초기화한다. v2가 해외제조업소명에서 만든 증류소 후보는 `NULL`로 정리한다. DDL과 data backfill은 별도 migration으로 실행하며 둘 다 재실행 시 같은 결과를 유지한다. `00007` Down은 비가역 data update의 실행 성공만 보장하는 no-op이며, 성공 rollback이 덮어쓴 v2 상태·claim·증류소 후보를 원상복구한다는 뜻이 아니다.
 

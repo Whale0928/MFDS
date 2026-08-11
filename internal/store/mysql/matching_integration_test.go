@@ -35,7 +35,7 @@ func TestMatchingStore_SaveMatchingResult_동시변경된버전을덮어쓰지�
 	if err != nil || len(sources) != 1 {
 		t.Fatalf("sources = %+v, error = %v", sources, err)
 	}
-	if _, err := store.db.Exec(`UPDATE declarations SET matching_version = 'newer-version' WHERE rcno = ?`, rcno); err != nil {
+	if _, err := store.db.Exec(`UPDATE mfds_declarations SET matching_version = 'newer-version' WHERE rcno = ?`, rcno); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,7 +51,7 @@ func TestMatchingStore_SaveMatchingResult_동시변경된버전을덮어쓰지�
 		t.Fatal("SaveMatchingResult() error = nil")
 	}
 	var version string
-	if err := store.db.QueryRow(`SELECT matching_version FROM declarations WHERE rcno = ?`, rcno).Scan(&version); err != nil {
+	if err := store.db.QueryRow(`SELECT matching_version FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
 	if version != "newer-version" {

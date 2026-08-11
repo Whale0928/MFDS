@@ -21,24 +21,24 @@ var errNormalizationLeaseLost = errors.New("normalization claim lease lost")
 func (s *Store) SyncDeclarations(ctx context.Context) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO declarations (rcno, source_item_id)
+			INSERT INTO mfds_declarations (rcno, source_item_id)
 			SELECT latest.rcno, latest.id
 			FROM (
 				SELECT id, rcno,
 				       ROW_NUMBER() OVER (
 				           PARTITION BY rcno ORDER BY observed_at DESC, id DESC
 				       ) AS rn
-				FROM items
+				FROM mfds_items
 			) AS latest
 			WHERE latest.rn = 1
-			ON DUPLICATE KEY UPDATE rcno = declarations.rcno
+			ON DUPLICATE KEY UPDATE rcno = mfds_declarations.rcno
 		`)
 		if err != nil {
 			return fmt.Errorf("신규 declaration 동기화 실패: %w", err)
 		}
 		_, err = tx.ExecContext(ctx, `
-			UPDATE declarations AS d
-			JOIN items AS previous ON previous.id = d.source_item_id
+			UPDATE mfds_declarations AS d
+			JOIN mfds_items AS previous ON previous.id = d.source_item_id
 			JOIN (
 				SELECT id, rcno
 				FROM (
@@ -46,11 +46,11 @@ func (s *Store) SyncDeclarations(ctx context.Context) error {
 					       ROW_NUMBER() OVER (
 					           PARTITION BY rcno ORDER BY observed_at DESC, id DESC
 					       ) AS rn
-					FROM items
+					FROM mfds_items
 				) AS ranked
 				WHERE ranked.rn = 1
 			) AS latest ON latest.rcno = d.rcno
-			JOIN items AS current ON current.id = latest.id
+			JOIN mfds_items AS current ON current.id = latest.id
 			SET d.normalization_status = CASE
 			        WHEN previous.semantic_sha256 <=> current.semantic_sha256
 			        THEN d.normalization_status
@@ -115,8 +115,8 @@ func (s *Store) Claim(
 			       COALESCE(i.manufacture_country_name, ''), COALESCE(i.export_country_name, ''),
 			       COALESCE(i.expiry_text, ''),
 			       i.processed_date, d.claim_attempts
-			FROM declarations AS d
-			JOIN items AS i ON i.id = d.source_item_id
+			FROM mfds_declarations AS d
+			JOIN mfds_items AS i ON i.id = d.source_item_id
 			WHERE (d.claim_owner IS NULL OR d.claim_lease_until < NOW(6))
 			  AND (
 			       (? <> '' AND d.rcno = ?)
@@ -157,7 +157,7 @@ func (s *Store) Claim(
 		for _, candidate := range candidates {
 			source := candidate.source
 			result, updateErr := tx.ExecContext(ctx, `
-				UPDATE declarations
+				UPDATE mfds_declarations
 				SET claim_owner = ?, claim_lease_until = NOW(6) + INTERVAL ? MICROSECOND,
 				    claim_attempts = claim_attempts + 1,
 				    claim_next_attempt_at = NULL, claim_last_error = NULL
@@ -196,7 +196,7 @@ func (s *Store) Preview(
 			       ROW_NUMBER() OVER (
 			           PARTITION BY rcno ORDER BY observed_at DESC, id DESC
 			       ) AS rn
-			FROM items
+			FROM mfds_items
 		)
 		SELECT COALESCE(d.id, 0), latest.rcno, latest.id, HEX(latest.semantic_sha256),
 		       COALESCE(latest.product_name_ko, ''), COALESCE(latest.product_name_en, ''),
@@ -206,7 +206,7 @@ func (s *Store) Preview(
 		       COALESCE(latest.expiry_text, ''),
 		       latest.processed_date, COALESCE(d.claim_attempts, 0)
 		FROM latest_items AS latest
-		LEFT JOIN declarations AS d ON d.rcno = latest.rcno
+		LEFT JOIN mfds_declarations AS d ON d.rcno = latest.rcno
 		WHERE latest.rn = 1
 		  AND (d.claim_owner IS NULL OR d.claim_lease_until < NOW(6))
 		  AND (
@@ -363,7 +363,7 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	}
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `
-		UPDATE declarations
+		UPDATE mfds_declarations
 		SET `+assign.clause()+`
 		WHERE id = ? AND rcno = ? AND source_item_id = ?
 		  AND claim_owner = ? AND claim_attempts = ? AND claim_lease_until >= NOW(6)
@@ -401,7 +401,7 @@ func storedNormalizationCandidates(candidates []normalization.ReferenceCandidate
 func (s *Store) Fail(ctx context.Context, failure normalization.Failure) error {
 	// 재시도 시각도 lease와 같은 DB 시계를 쓴다. 이 값은 Claim의 NOW(6) 비교 대상이다.
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE declarations
+		UPDATE mfds_declarations
 		SET claim_owner = NULL, claim_lease_until = NULL,
 		    claim_next_attempt_at = NOW(6) + INTERVAL ? MICROSECOND, claim_last_error = ?
 		WHERE id = ? AND rcno = ? AND source_item_id = ?
@@ -426,9 +426,9 @@ func (s *Store) Remaining(ctx context.Context) (normalization.Remaining, error) 
 	err = s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM (
-			SELECT rcno FROM items GROUP BY rcno
+			SELECT rcno FROM mfds_items GROUP BY rcno
 		) AS ledger_rcno
-		LEFT JOIN declarations AS d ON d.rcno = ledger_rcno.rcno
+		LEFT JOIN mfds_declarations AS d ON d.rcno = ledger_rcno.rcno
 		WHERE d.id IS NULL
 	`).Scan(&missing)
 	if err != nil {

@@ -76,7 +76,7 @@ func integrationService(t *testing.T, store *Store, serverURL string) *weblist.S
 func cleanupIntegrationJob(t *testing.T, store *Store, jobID uint64) {
 	t.Helper()
 	t.Cleanup(func() {
-		if _, err := store.db.Exec("DELETE FROM jobs WHERE id = ?", jobID); err != nil {
+		if _, err := store.db.Exec("DELETE FROM mfds_jobs WHERE id = ?", jobID); err != nil {
 			t.Errorf("integration Job cleanup error = %v", err)
 		}
 	})
@@ -109,20 +109,20 @@ func TestExecuteJob_날짜Task_4개품목과추가페이지를저장한다(t *te
 		t.Fatalf("result = %+v", result)
 	}
 	var taskCount, itemKinds, fetchCount, itemCount, attempts, acceptedRows int
-	if err := store.db.QueryRow("SELECT COUNT(*) FROM tasks WHERE job_id=?", result.RunID).Scan(&taskCount); err != nil {
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM mfds_tasks WHERE job_id=?", result.RunID).Scan(&taskCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRow("SELECT COUNT(DISTINCT item_code) FROM fetches WHERE job_id=?", result.RunID).Scan(&itemKinds); err != nil {
+	if err := store.db.QueryRow("SELECT COUNT(DISTINCT item_code) FROM mfds_fetches WHERE job_id=?", result.RunID).Scan(&itemKinds); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRow("SELECT COUNT(*) FROM fetches WHERE job_id=?", result.RunID).Scan(&fetchCount); err != nil {
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM mfds_fetches WHERE job_id=?", result.RunID).Scan(&fetchCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRow("SELECT COUNT(*) FROM items WHERE job_id=?", result.RunID).Scan(&itemCount); err != nil {
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM mfds_items WHERE job_id=?", result.RunID).Scan(&itemCount); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.db.QueryRow(
-		"SELECT attempts, parsed_rows FROM tasks WHERE job_id=?",
+		"SELECT attempts, parsed_rows FROM mfds_tasks WHERE job_id=?",
 		result.RunID,
 	).Scan(&attempts, &acceptedRows); err != nil {
 		t.Fatal(err)
@@ -177,12 +177,12 @@ func TestExecuteJob_페이지경계RCNO중복_날짜전체를재검증한다(t *
 	var attempts, acceptedRows, acceptedUnique, rawRows int
 	if err := store.db.QueryRow(`
 		SELECT attempts, parsed_rows, unique_rcno_count
-		FROM tasks WHERE job_id=?
+		FROM mfds_tasks WHERE job_id=?
 	`, result.RunID).Scan(&attempts, &acceptedRows, &acceptedUnique); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.db.QueryRow(
-		"SELECT COUNT(*) FROM items WHERE job_id=?",
+		"SELECT COUNT(*) FROM mfds_items WHERE job_id=?",
 		result.RunID,
 	).Scan(&rawRows); err != nil {
 		t.Fatal(err)
@@ -195,8 +195,8 @@ func TestExecuteJob_페이지경계RCNO중복_날짜전체를재검증한다(t *
 	} {
 		if err := store.db.QueryRow(`
 			SELECT COUNT(DISTINCT i.rcno)
-			FROM items AS i
-			JOIN fetches AS f ON f.id=i.fetch_id
+			FROM mfds_items AS i
+			JOIN mfds_fetches AS f ON f.id=i.fetch_id
 			WHERE i.job_id=? AND f.item_code=? AND f.attempt_no=?
 		`, result.RunID, integrationTargets[0].Code, attempt).Scan(destination); err != nil {
 			t.Fatal(err)
@@ -248,16 +248,16 @@ func TestExecuteJob_부분실패후Task전체재시도_중복키를위반하지�
 	}
 	cleanupIntegrationJob(t, store, result.RunID)
 	var attempts, failedFetches, duplicateKeys int
-	if err := store.db.QueryRow("SELECT attempts FROM tasks WHERE job_id=?", result.RunID).Scan(&attempts); err != nil {
+	if err := store.db.QueryRow("SELECT attempts FROM mfds_tasks WHERE job_id=?", result.RunID).Scan(&attempts); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRow("SELECT COUNT(*) FROM fetches WHERE job_id=? AND status='FAILED'", result.RunID).Scan(&failedFetches); err != nil {
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM mfds_fetches WHERE job_id=? AND status='FAILED'", result.RunID).Scan(&failedFetches); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.db.QueryRow(`
 		SELECT COUNT(*) FROM (
 			SELECT job_id, request_key_sha256, attempt_no, COUNT(*) count
-			FROM fetches WHERE job_id=?
+			FROM mfds_fetches WHERE job_id=?
 			GROUP BY job_id, request_key_sha256, attempt_no HAVING count > 1
 		) duplicated
 	`, result.RunID).Scan(&duplicateKeys); err != nil {
@@ -288,10 +288,10 @@ func TestExecuteJob_빈결과날짜_4개Fetch로완료한다(t *testing.T) {
 	}
 	cleanupIntegrationJob(t, store, result.RunID)
 	var fetches, items int
-	if err := store.db.QueryRow("SELECT COUNT(*) FROM fetches WHERE job_id=?", result.RunID).Scan(&fetches); err != nil {
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM mfds_fetches WHERE job_id=?", result.RunID).Scan(&fetches); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRow("SELECT COUNT(*) FROM items WHERE job_id=?", result.RunID).Scan(&items); err != nil {
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM mfds_items WHERE job_id=?", result.RunID).Scan(&items); err != nil {
 		t.Fatal(err)
 	}
 	if result.Status != weblist.RunStatusCompleted || fetches != 4 || items != 0 {

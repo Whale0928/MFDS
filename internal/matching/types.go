@@ -11,7 +11,7 @@ type MatchingVersion struct {
 	ReferenceHash string
 }
 
-// String fits the rule and a collision-resistant reference hash prefix into declarations.matching_version.
+// String fits the rule and a collision-resistant reference hash prefix into mfds_declarations.matching_version.
 func (v MatchingVersion) String() string {
 	const (
 		columnLength = 64
