@@ -60,6 +60,8 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			return service.ExecuteJob(ctx, command)
 		},
 		RunNormalization: runNormalization,
+		RunMatching:      runMatching,
+		RunReferenceSync: runReferenceSync,
 		Out:              out,
 		ErrOut:           errOut,
 	})

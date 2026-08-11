@@ -39,6 +39,8 @@ task compose:up
 task migrate
 task health
 
+task run -- reference-sync
+
 task run -- collect \
   --from YYYY-MM-DD \
   --to YYYY-MM-DD \
@@ -48,6 +50,9 @@ task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
+
+task run -- match --all --dry-run
+task run -- match --all
 ```
 
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
@@ -56,6 +61,11 @@ task run -- normalize --dry-run
 `UNPARSED`로 구분합니다. 원문 `items`는 수정하거나 삭제하지 않습니다.
 시스템 오류로 최대 재시도 횟수를 소진한 RCNO는 원인을 해결한 뒤
 `normalize --rcno RCNO`로 강제 재정제합니다.
+
+`reference-sync`는 로컬 `alcohols`, `distilleries`, `regions`를 한 트랜잭션으로
+교체하고 소스와 타깃의 모든 컬럼을 결정적 해시로 검증합니다. 정제 전에 먼저
+실행해야 합니다. 1차 정제는 증류소·리전 후보를 함께 저장하고, `match`는 이미
+정제된 행을 백필합니다. 두 경로 모두 관리자가 선택한 ID는 변경하지 않습니다.
 
 ## 설정
 
@@ -73,6 +83,9 @@ MYSQL_ROOT_PASSWORD  MYSQL_DATABASE  MYSQL_USER  MYSQL_PASSWORD  MYSQL_DSN
 
 OS 환경 변수가 `task setup`이 생성하는 추적 제외 `.env.local`보다 우선합니다.
 Migration과 생성된 sqlc 코드는 `git.secrets`에서 관리합니다.
+`reference-sync`는 프로세스 환경 변수 `BOTTLENOTE_REFERENCE_DSN`을 추가로
+요구합니다. DSN은 secret manager나 입력을 표시하지 않는 shell prompt로
+주입하고 shell history 또는 추적 파일에 직접 기록하지 않습니다.
 
 ## 구조
 
@@ -83,7 +96,10 @@ internal/config/             YAML과 DB 환경 변수 로딩
 internal/source/mfdsweb/     HTTP client와 HTML parser
 internal/usecase/weblist/    수집과 RCNO 대조
 internal/normalization/      순수 정제 규칙과 파서
+internal/matching/           불변 alcohol·증류소·리전 matcher
+internal/reference/          트랜잭션 기반 BottleNote 기준 데이터 동기화
 internal/usecase/normalization/ 정제 batch와 상태 전이
+internal/usecase/matching/   매칭 dry-run과 백필 조정
 internal/store/mysql/        원장과 정제 결과 저장
 data/config.yaml             비밀이 아닌 고정 실행값
 ```

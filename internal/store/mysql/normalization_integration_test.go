@@ -243,6 +243,70 @@ func TestNormalizationStore_ClaimFencing실패재시도와강제재정제를보�
 	}
 }
 
+func TestNormalizationStore_Complete_후보를저장하고관리자선택을보존한다(t *testing.T) {
+	// Given
+	store := normalizationStore(t)
+	fixture := newNormalizationFixture(t, store)
+	rcno := fmt.Sprintf("NORM-MATCH-%d", time.Now().UnixNano())
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	fixture.item(t, rcno, "matching", now, now)
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "matching-worker"))
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("claim = %+v, error = %v", sources, err)
+	}
+	if _, err := store.db.Exec(`
+		UPDATE declarations SET selected_distillery_id = 901, selected_region_id = 902 WHERE rcno = ?
+	`, rcno); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	err = store.Complete(context.Background(), normalization.Completion{
+		Source: sources[0],
+		Result: normalization.Result{
+			Status: normalization.StatusNormalized,
+			Fields: normalization.Fields{
+				DistilleryCandidates: []normalization.ReferenceCandidate{{ID: 11, Score: 100}, {ID: 12, Score: 60}},
+				RegionCandidates:     []normalization.ReferenceCandidate{{ID: 21, Score: 80}},
+				MatchingVersion:      "matching-test",
+			},
+		},
+		NormalizationVersion: "normalization-test",
+		NormalizedAt:         now,
+	})
+
+	// Then
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selectedDistillery, selectedRegion, firstDistillery, secondDistillery, firstRegion int64
+	var firstDistilleryScore, secondDistilleryScore, firstRegionScore float64
+	if err := store.db.QueryRow(`
+		SELECT selected_distillery_id, selected_region_id,
+		       distillery_candidate_1_id, distillery_candidate_1_score,
+		       distillery_candidate_2_id, distillery_candidate_2_score,
+		       region_candidate_1_id, region_candidate_1_score
+		FROM declarations WHERE rcno = ?
+	`, rcno).Scan(
+		&selectedDistillery, &selectedRegion,
+		&firstDistillery, &firstDistilleryScore, &secondDistillery, &secondDistilleryScore,
+		&firstRegion, &firstRegionScore,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if selectedDistillery != 901 || selectedRegion != 902 {
+		t.Fatalf("selected IDs changed: distillery=%d region=%d", selectedDistillery, selectedRegion)
+	}
+	if firstDistillery != 11 || firstDistilleryScore != 1 || secondDistillery != 12 || secondDistilleryScore != 0.6 ||
+		firstRegion != 21 || firstRegionScore != 0.8 {
+		t.Fatalf("candidate slots mismatch: distillery=(%d,%.2f),(%d,%.2f) region=(%d,%.2f)",
+			firstDistillery, firstDistilleryScore, secondDistillery, secondDistilleryScore, firstRegion, firstRegionScore)
+	}
+}
+
 func TestNormalizationStore_동시Claim_하나의Worker만획득한다(t *testing.T) {
 	store := normalizationStore(t)
 	fixture := newNormalizationFixture(t, store)

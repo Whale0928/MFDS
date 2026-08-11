@@ -71,3 +71,25 @@ func TestMigration00008_기준테이블과고정후보컬럼을한번에준비�
 		t.Fatalf("00008 must contain one Up and one Down declarations ALTER: %s", sql)
 	}
 }
+
+func TestMigration00009_원본Alcohol스키마를FK없이복제한다(t *testing.T) {
+	contents, err := migrations.FS.ReadFile("00009_add_alcohol_references.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(string(contents))
+
+	for _, required := range []string{
+		"CREATE TABLE ALCOHOLS", "ID                          BIGINT NOT NULL AUTO_INCREMENT",
+		"REGION_ID", "DISTILLERY_ID", "DELETED_AT", "IDX_ALCOHOLS_REGION_ID", "IDX_ALCOHOLS_DISTILLERY_ID",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("00009 must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"FOREIGN KEY", "SORT_ORDER"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("00009 must preserve source orphan rows and columns: found %q", forbidden)
+		}
+	}
+}

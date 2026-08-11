@@ -22,6 +22,8 @@ type Dependencies struct {
 	OpenDatabase     func(config.DatabaseConfig) (Database, error)
 	RunWebListJob    RunWebListJobFunc
 	RunNormalization RunNormalizationFunc
+	RunMatching      RunMatchingFunc
+	RunReferenceSync RunReferenceSyncFunc
 	Out              io.Writer
 	ErrOut           io.Writer
 }
@@ -31,6 +33,8 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 		deps.OpenDatabase == nil ||
 		deps.RunWebListJob == nil ||
 		deps.RunNormalization == nil ||
+		deps.RunMatching == nil ||
+		deps.RunReferenceSync == nil ||
 		deps.Out == nil ||
 		deps.ErrOut == nil {
 		return nil, fmt.Errorf("CLI 의존성이 모두 필요합니다")
@@ -68,6 +72,8 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 		return nil, err
 	}
 	root.AddCommand(newNormalizeCommand(getConfig, deps.RunNormalization, deps.Out))
+	root.AddCommand(newMatchCommand(getConfig, deps.RunMatching, deps.Out))
+	root.AddCommand(newReferenceSyncCommand(getConfig, deps.RunReferenceSync, deps.Out))
 	return root, nil
 }
 

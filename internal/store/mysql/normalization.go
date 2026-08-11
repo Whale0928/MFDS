@@ -320,6 +320,10 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	assign.set("cask_candidate", nullableString(fields.CaskCandidate))
 	assign.set("distillery_name_ko_candidate", nullableString(fields.DistilleryNameKOCandidate))
 	assign.set("distillery_name_en_candidate", nullableString(fields.DistilleryNameENCandidate))
+	setStoredCandidates(assign, "distillery", storedNormalizationCandidates(fields.DistilleryCandidates))
+	setStoredCandidates(assign, "region", storedNormalizationCandidates(fields.RegionCandidates))
+	assign.set("matching_version", nullableString(fields.MatchingVersion))
+	assign.set("matched_at", completion.NormalizedAt)
 
 	assign.set("manufacture_country_name_ko", nullableString(fields.ManufactureCountryNameKO))
 	assign.set("manufacture_country_name_en", nullableString(fields.ManufactureCountryNameEN))
@@ -361,6 +365,14 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		return err
 	}
 	return nil
+}
+
+func storedNormalizationCandidates(candidates []normalization.ReferenceCandidate) []storedCandidate {
+	stored := make([]storedCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		stored = append(stored, storedCandidate{id: candidate.ID, score: normalizedCandidateScore(candidate.Score)})
+	}
+	return stored
 }
 
 // Fail releases a fenced claim for a later retry while keeping prior derived

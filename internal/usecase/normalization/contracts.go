@@ -101,6 +101,15 @@ type Fields struct {
 	ExportCountryNameEN            string
 	ExportCountryAlpha2            string
 	ExportCountryAlpha3            string
+	DistilleryCandidates           []ReferenceCandidate
+	RegionCandidates               []ReferenceCandidate
+	MatchingVersion                string
+}
+
+// ReferenceCandidate is one ranked BottleNote reference. Selection remains an administrator decision.
+type ReferenceCandidate struct {
+	ID    int64
+	Score int
 }
 
 // Result is the parser's deterministic, non-destructive decision.

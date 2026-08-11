@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
+	"github.com/bottle-note/mfds-crawler/internal/reference"
+	matchingusecase "github.com/bottle-note/mfds-crawler/internal/usecase/matching"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
@@ -45,7 +47,7 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
-	for _, command := range []string{"collect", "health", "migrate", "normalize"} {
+	for _, command := range []string{"collect", "health", "match", "migrate", "normalize", "reference-sync"} {
 		if !strings.Contains(output.String(), command) {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
@@ -122,6 +124,8 @@ func newTestRootWithRunner(
 		},
 		RunWebListJob:    runWebListJob,
 		RunNormalization: successfulNormalization,
+		RunMatching:      successfulMatching,
+		RunReferenceSync: successfulReferenceSync,
 		Out:              output,
 		ErrOut:           output,
 	})
@@ -130,6 +134,18 @@ func newTestRootWithRunner(
 	}
 	t.Chdir(filepath.Dir(filepath.Dir(configFile)))
 	return root, output
+}
+
+func successfulReferenceSync(context.Context, config.Config) (reference.Result, error) {
+	return reference.Result{}, nil
+}
+
+func successfulMatching(
+	context.Context,
+	config.Config,
+	matchingusecase.Command,
+) (matchingusecase.Summary, error) {
+	return matchingusecase.Summary{}, nil
 }
 
 func successfulNormalization(
