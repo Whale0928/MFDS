@@ -61,7 +61,6 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 		},
 		RunNormalization: runNormalization,
 		RunMatching:      runMatching,
-		RunReferenceSync: runReferenceSync,
 		Out:              out,
 		ErrOut:           errOut,
 	})

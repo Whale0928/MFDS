@@ -13,7 +13,6 @@ import (
 
 type Database interface {
 	Ping(context.Context) error
-	Migrate(context.Context) error
 	Close() error
 }
 
@@ -23,7 +22,6 @@ type Dependencies struct {
 	RunWebListJob    RunWebListJobFunc
 	RunNormalization RunNormalizationFunc
 	RunMatching      RunMatchingFunc
-	RunReferenceSync RunReferenceSyncFunc
 	Out              io.Writer
 	ErrOut           io.Writer
 }
@@ -34,7 +32,6 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 		deps.RunWebListJob == nil ||
 		deps.RunNormalization == nil ||
 		deps.RunMatching == nil ||
-		deps.RunReferenceSync == nil ||
 		deps.Out == nil ||
 		deps.ErrOut == nil {
 		return nil, fmt.Errorf("CLI 의존성이 모두 필요합니다")
@@ -66,14 +63,12 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 	getConfig := func() config.Config { return cfg }
 	root.AddCommand(
 		newHealthCommand(getConfig, deps.OpenDatabase, deps.Out),
-		newMigrateCommand(getConfig, deps.OpenDatabase, deps.Out),
 	)
 	if err := addCollectorContract(root, getConfig, deps.RunWebListJob); err != nil {
 		return nil, err
 	}
 	root.AddCommand(newNormalizeCommand(getConfig, deps.RunNormalization, deps.Out))
 	root.AddCommand(newMatchCommand(getConfig, deps.RunMatching, deps.Out))
-	root.AddCommand(newReferenceSyncCommand(getConfig, deps.RunReferenceSync, deps.Out))
 	return root, nil
 }
 
@@ -103,32 +98,4 @@ func newHealthCommand(
 			return nil
 		},
 	}
-}
-
-func newMigrateCommand(
-	getConfig func() config.Config,
-	openDatabase func(config.DatabaseConfig) (Database, error),
-	out io.Writer,
-) *cobra.Command {
-	migrateCmd := &cobra.Command{
-		Use:   "migrate",
-		Short: "MySQL migration을 적용합니다",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			db, err := openDatabase(getConfig().Database)
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			if err := db.Ping(cmd.Context()); err != nil {
-				return err
-			}
-			if err := db.Migrate(cmd.Context()); err != nil {
-				return err
-			}
-			fmt.Fprintln(out, "migration 적용 완료")
-			return nil
-		},
-	}
-	return migrateCmd
 }

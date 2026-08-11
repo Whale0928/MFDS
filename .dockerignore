@@ -1,7 +1,7 @@
 # 시크릿 서브모듈은 빌드 컨텍스트에 넣지 않는다. cosign 키와 암호문이 레이어에 남으면 안 된다.
 git.environment-variables/
 
-# git.secrets는 sqlcgen과 migrations를 제공하는 컴파일 의존성이라 제외하지 않는다.
+# git.secrets는 sqlcgen을 제공하는 컴파일 의존성이라 제외하지 않는다.
 git.secrets/.git
 
 # actions/checkout이 PAT를 .git/config와 .git/modules/*/config에 extraheader로 남긴다.

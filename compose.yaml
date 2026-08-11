@@ -24,5 +24,20 @@ services:
       timeout: 3s
       retries: 30
 
+  flyway:
+    image: flyway/flyway:11.20.3-alpine
+    profiles: ["tools"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./git.environment-variables/storage/db/migration:/flyway/sql:ro
+    command:
+      - -url=jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-mfds_ledger}?allowPublicKeyRetrieval=true&useSSL=false
+      - -user=${MYSQL_USER:-mfds}
+      - -password=${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      - -connectRetries=10
+      - migrate
+
 volumes:
   mfds_mysql_data:

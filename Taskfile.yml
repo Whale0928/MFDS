@@ -91,9 +91,10 @@ tasks:
       - go run . health
 
   migrate:
-    desc: MySQL migration을 적용합니다
+    desc: BottleNote Flyway migration을 로컬 MySQL에 적용합니다
+    deps: [compose:up]
     cmds:
-      - go run . migrate
+      - docker compose --env-file .env.local --profile tools run --rm flyway
 
   sqlc:
     desc: db 스키마와 쿼리에서 Go 코드를 생성합니다

@@ -14,11 +14,7 @@ import (
 
 func normalizationStore(t *testing.T) *Store {
 	t.Helper()
-	store := integrationStore(t)
-	if err := store.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	return store
+	return integrationStore(t)
 }
 
 type normalizationFixture struct {
