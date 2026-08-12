@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"time"
+
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
@@ -15,6 +17,9 @@ func addCollectorContract(
 	if err != nil {
 		return err
 	}
-	root.AddCommand(collect)
+	root.AddCommand(
+		collect,
+		newCollectRecentCommand(getConfig, runWebListJob, root.OutOrStdout(), time.Now),
+	)
 	return nil
 }

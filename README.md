@@ -44,6 +44,8 @@ task run -- collect \
   --to YYYY-MM-DD \
   --workers 2
 
+task run -- collect-recent
+
 task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
@@ -58,6 +60,9 @@ regardless of its current state, while `--dry-run` changes no ledger row,
 declaration, lease, or timestamp. States are `PENDING`, `STALE`, `NORMALIZED`,
 `PARTIAL`, `REVIEW_REQUIRED`, and `UNPARSED`. Source `mfds_items` are never updated
 or deleted.
+`collect-recent` takes no arguments and append-only collects the seven calendar
+days ending today in KST. Repeated runs intentionally preserve overlapping
+observations. It does not run normalization.
 After fixing a system error, recover an RCNO that exhausted its retry limit with
 `normalize --rcno RCNO`.
 

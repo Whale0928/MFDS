@@ -44,6 +44,8 @@ task run -- collect \
   --to YYYY-MM-DD \
   --workers 2
 
+task run -- collect-recent
+
 task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
@@ -57,6 +59,9 @@ task run -- match --all
 재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
 정제 상태는 `PENDING`, `STALE`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`,
 `UNPARSED`로 구분합니다. 원문 `mfds_items`는 수정하거나 삭제하지 않습니다.
+`collect-recent`는 인자 없이 KST 오늘을 포함한 최근 7일을 append-only로
+수집합니다. 반복 실행 시 겹치는 관측치를 의도적으로 보존하며 정제는 실행하지
+않습니다.
 시스템 오류로 최대 재시도 횟수를 소진한 RCNO는 원인을 해결한 뒤
 `normalize --rcno RCNO`로 강제 재정제합니다.
 
