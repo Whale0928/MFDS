@@ -200,12 +200,6 @@ func (s *Server) declaration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	detail.Groups = groups
-	officialRecords, err := s.companyRecordsByName(r.Context(), detail.ImporterName, "")
-	if err != nil {
-		writeDatabaseError(w, err)
-		return
-	}
-	detail.OfficialCompanyRecords = officialRecords
 	if runID := matchingRunID(groups); runID > 0 {
 		detail.MatchingCandidates, err = s.matchingCandidateDetails(r, rcno, runID)
 		if err != nil {

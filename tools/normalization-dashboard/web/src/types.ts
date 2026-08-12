@@ -37,7 +37,6 @@ export interface Declaration {
   evidence?: DetailEvidence[]
   fields?: Record<string, string>
   groups?: DetailGroup[]
-  official_company_records?: OfficialRecord[]
   matching_candidates?: MatchingCandidate[]
 }
 
@@ -123,37 +122,4 @@ export interface DeclarationQuery {
   region_match?: MatchFilter
   sort?: DeclarationSort
   order?: SortOrder
-}
-
-export interface OfficialRecord {
-  source_type: 'BUSINESS_LICENSE' | 'CLOSURE' | 'EXCELLENT_IMPORTER' | 'DISPOSITION' | string
-  source_name: string
-  observed_at: string
-  fields: DetailField[]
-}
-
-export interface Company {
-  business_name: string
-  license_number: string
-  industry_name: string
-  address: string
-  latest_observed_at: string
-  has_business_license: boolean
-  has_closure: boolean
-  has_excellent_importer: boolean
-  has_disposition: boolean
-}
-
-export interface CompanyPage {
-  companies: Company[]
-  total: number
-  page: number
-  page_size: number
-  total_pages: number
-}
-
-export interface CompanyDetail {
-  business_name: string
-  license_number: string
-  records: OfficialRecord[]
 }

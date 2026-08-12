@@ -3,13 +3,12 @@ import { api } from './api'
 import { date, fieldLabel, number, reasonLabel, statusLabel } from './format'
 import { BarChart } from './components/BarChart'
 import { DetailDrawer } from './components/DetailDrawer'
-import { CompanyDetailDrawer } from './components/CompanyDetailDrawer'
 import { Hint, Term } from './components/Hint'
 import { hintFor } from './glossary'
 import { StatusChip } from './components/StatusChip'
-import type { Company, CompanyDetail, CompanyPage, Declaration, DeclarationPage, DeclarationSort, Filters, MatchFilter, Quality, SortOrder } from './types'
+import type { Declaration, DeclarationPage, DeclarationSort, Filters, MatchFilter, Quality, SortOrder } from './types'
 
-type Section = 'browse' | 'companies' | 'review' | 'quality'
+type Section = 'browse' | 'review' | 'quality'
 type MatchingSort = `${DeclarationSort}:${SortOrder}`
 const PAGE_SIZE = 20
 const blankFilters: Filters = { statuses: [], item_names: [], importers: [], countries: [], reason_codes: [] }
@@ -36,10 +35,7 @@ export default function App() {
   const [matchingSort, setMatchingSort] = useState<MatchingSort>('processed_at:desc')
   const [page, setPage] = useState(1)
   const [reviewPage, setReviewPage] = useState(1)
-  const [companyPage, setCompanyPage] = useState(1)
-  const [companyQuery, setCompanyQuery] = useState('')
   const [selected, setSelected] = useState<Declaration | null>(null)
-  const [selectedCompany, setSelectedCompany] = useState<CompanyDetail | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const filterLoad = useMemo(() => api.filters, [])
   const qualityLoad = useMemo(() => api.quality, [])
@@ -48,15 +44,12 @@ export default function App() {
     return () => api.declarations({ page, page_size: PAGE_SIZE, q: query || undefined, status: status || undefined, item_name: itemName || undefined, importer: importer || undefined, country: country || undefined, reason: reason || undefined, alcohol_match: alcoholMatch || undefined, distillery_match: distilleryMatch || undefined, region_match: regionMatch || undefined, sort, order })
   }, [page, query, status, itemName, importer, country, reason, alcoholMatch, distilleryMatch, regionMatch, matchingSort])
   const reviewLoad = useMemo(() => () => api.declarations({ page: reviewPage, page_size: PAGE_SIZE, status: 'REVIEW_REQUIRED' }), [reviewPage])
-  const companyLoad = useMemo(() => () => api.companies({ page: companyPage, page_size: PAGE_SIZE, q: companyQuery || undefined }), [companyPage, companyQuery])
   const filters = useRemote<Filters>(filterLoad, blankFilters)
   const quality = useRemote<Quality>(qualityLoad, null)
   const declarations = useRemote<DeclarationPage>(declarationLoad, null)
   const reviews = useRemote<DeclarationPage>(reviewLoad, null)
-  const companies = useRemote<CompanyPage>(companyLoad, null)
   const openDetail = async (entry: Declaration) => {
     setDetailError(null)
-    setSelectedCompany(null)
     try {
       setSelected(await api.declaration(entry.rcno))
     } catch {
@@ -64,54 +57,21 @@ export default function App() {
       setDetailError('이 건의 상세 값을 불러오지 못했습니다.')
     }
   }
-  const openCompany = async (entry: Company) => {
-    setDetailError(null)
-    setSelected(null)
-    try {
-      setSelectedCompany(await api.company(entry.business_name, entry.license_number))
-    } catch {
-      setSelectedCompany(null)
-      setDetailError('이 업체의 공식정보 상세를 불러오지 못했습니다.')
-    }
-  }
 
   return <main className="shell">
     <header className="masthead">
       <a className="brand" href="#browse" onClick={() => setSection('browse')}><span>MFDS</span><b>수입주류 신고 원장</b><i>시연용</i></a>
-      <nav aria-label="화면 이동">{([['browse', '수입 기록'], ['companies', '수입업체 공식정보'], ['review', '확인 필요 목록'], ['quality', '전체 통계']] as Array<[Section, string]>).map(([key, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{label}</button>)}</nav>
+      <nav aria-label="화면 이동">{([['browse', '데이터 탐색'], ['review', '확인 필요 목록'], ['quality', '전체 통계']] as Array<[Section, string]>).map(([key, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{label}</button>)}</nav>
       <p className="masthead__note">읽기 전용 / 이 화면에서는 아무 값도 고치지 않습니다</p>
     </header>
 
     {section === 'browse' && <BrowseView page={declarations.data} loading={declarations.loading} error={declarations.error} filters={filters.data ?? blankFilters} query={query} status={status} itemName={itemName} importer={importer} country={country} reason={reason} alcoholMatch={alcoholMatch} distilleryMatch={distilleryMatch} regionMatch={regionMatch} matchingSort={matchingSort} onQuery={setQuery} onStatus={setStatus} onItemName={setItemName} onImporter={setImporter} onCountry={setCountry} onReason={setReason} onAlcoholMatch={setAlcoholMatch} onDistilleryMatch={setDistilleryMatch} onRegionMatch={setRegionMatch} onMatchingSort={setMatchingSort} onOpen={openDetail} pageNumber={page} onPage={setPage} />}
-    {section === 'companies' && <CompanyView page={companies.data} loading={companies.loading} error={companies.error} query={companyQuery} onQuery={(value) => { setCompanyQuery(value); setCompanyPage(1) }} onOpen={openCompany} pageNumber={companyPage} onPage={setCompanyPage} />}
     {section === 'review' && <ReviewView quality={quality.data} loading={quality.loading || reviews.loading} error={quality.error ?? reviews.error} declarations={reviews.data} onOpen={openDetail} pageNumber={reviewPage} onPage={setReviewPage} />}
     {section === 'quality' && <QualityView quality={quality.data} loading={quality.loading} error={quality.error} />}
 
     {detailError && <div className="detail-error" role="alert"><span>{detailError}</span><button onClick={() => setDetailError(null)}>닫기</button></div>}
     <DetailDrawer declaration={selected} onClose={() => setSelected(null)} />
-    <CompanyDetailDrawer company={selectedCompany} onClose={() => setSelectedCompany(null)} />
   </main>
-}
-
-function CompanyView({ page, loading, error, query, onQuery, onOpen, pageNumber, onPage }: { page: CompanyPage | null; loading: boolean; error: string | null; query: string; onQuery: (value: string) => void; onOpen: (entry: Company) => void; pageNumber: number; onPage: (value: number) => void }) {
-  const totalPages = Math.max(1, page?.total_pages ?? 0)
-  return <div className="page">
-    <PageTitle title="수입업체 공식정보" copy="변경일자 이후 동기화된 영업신고·폐업·우수수입업소·행정처분 기록입니다. 업체를 누르면 공식 응답의 상세 값을 볼 수 있습니다." />
-    <section className="filter-bar company-filter"><label>업체 검색<input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="업소명 또는 인허가번호" /></label><span className="filter-bar__count">{number(page?.total)}개 업체·영업소</span></section>
-    {loading && <Loading label="수입업체 공식정보를 읽는 중" />}{error && <ErrorPanel message={error} />}
-    {page && <><CompanyGrid entries={page.companies} onOpen={onOpen} /><div className="pagination"><button disabled={pageNumber <= 1} onClick={() => onPage(pageNumber - 1)}>이전</button><span>{pageNumber} / {totalPages}</span><button disabled={pageNumber >= totalPages} onClick={() => onPage(pageNumber + 1)}>다음</button></div></>}
-  </div>
-}
-
-function CompanyGrid({ entries, onOpen }: { entries: Company[]; onOpen: (entry: Company) => void }) {
-  if (!entries.length) return <div className="empty-state"><h2>동기화된 업체 정보가 없습니다.</h2><p>검색어를 바꾸거나 업체 공식정보 동기화 상태를 확인하세요.</p></div>
-  return <div className="company-grid">{entries.map((entry) => <button className="company-card" key={`${entry.business_name}-${entry.license_number}`} onClick={() => onOpen(entry)}>
-    <div className="company-card__head"><span>{entry.industry_name || '업종 정보 없음'}</span><time>{entry.latest_observed_at || '관측일 없음'}</time></div>
-    <h2>{entry.business_name}</h2>
-    <p className="company-card__license">인허가번호 {entry.license_number || '기록 없음'}</p>
-    <p className="company-card__address">{entry.address || '주소 정보 없음'}</p>
-    <div className="company-card__badges">{entry.has_business_license && <span>영업신고</span>}{entry.has_closure && <span className="warning">폐업정보</span>}{entry.has_excellent_importer && <span className="positive">우수수입업소</span>}{entry.has_disposition && <span className="warning">행정처분</span>}</div>
-  </button>)}</div>
 }
 
 function BrowseView({ page, loading, error, filters, query, status, itemName, importer, country, reason, alcoholMatch, distilleryMatch, regionMatch, matchingSort, onQuery, onStatus, onItemName, onImporter, onCountry, onReason, onAlcoholMatch, onDistilleryMatch, onRegionMatch, onMatchingSort, onOpen, pageNumber, onPage }: { page: DeclarationPage | null; loading: boolean; error: string | null; filters: Filters; query: string; status: string; itemName: string; importer: string; country: string; reason: string; alcoholMatch: MatchFilter; distilleryMatch: MatchFilter; regionMatch: MatchFilter; matchingSort: MatchingSort; onQuery: (value: string) => void; onStatus: (value: string) => void; onItemName: (value: string) => void; onImporter: (value: string) => void; onCountry: (value: string) => void; onReason: (value: string) => void; onAlcoholMatch: (value: MatchFilter) => void; onDistilleryMatch: (value: MatchFilter) => void; onRegionMatch: (value: MatchFilter) => void; onMatchingSort: (value: MatchingSort) => void; onOpen: (entry: Declaration) => void; pageNumber: number; onPage: (value: number) => void }) {

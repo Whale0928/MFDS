@@ -48,55 +48,21 @@ type declarationListResponse struct {
 	TotalPages   int                   `json:"total_pages"`
 }
 type declarationDetail struct {
-	RCNO                   string                    `json:"rcno"`
-	SourceName             string                    `json:"source_name"`
-	SourceNameEnglish      string                    `json:"source_name_english"`
-	NormalizedName         string                    `json:"normalized_name"`
-	NormalizedNameEnglish  string                    `json:"normalized_name_english"`
-	Status                 string                    `json:"status"`
-	ReasonCodes            []string                  `json:"reason_codes"`
-	Evidence               []evidenceItem            `json:"evidence"`
-	ProcessedAt            string                    `json:"processed_at"`
-	ItemName               string                    `json:"item_name"`
-	ImporterName           string                    `json:"importer_name"`
-	Country                string                    `json:"country"`
-	Fields                 map[string]string         `json:"fields"`
-	Groups                 []detailGroup             `json:"groups"`
-	OfficialCompanyRecords []officialRecord          `json:"official_company_records"`
-	MatchingCandidates     []matchingCandidateDetail `json:"matching_candidates"`
-}
-
-type companyListItem struct {
-	BusinessName       string `json:"business_name"`
-	LicenseNumber      string `json:"license_number"`
-	IndustryName       string `json:"industry_name"`
-	Address            string `json:"address"`
-	LatestObservedAt   string `json:"latest_observed_at"`
-	HasBusinessLicense bool   `json:"has_business_license"`
-	HasClosure         bool   `json:"has_closure"`
-	HasExcellent       bool   `json:"has_excellent_importer"`
-	HasDisposition     bool   `json:"has_disposition"`
-}
-
-type companyListResponse struct {
-	Companies  []companyListItem `json:"companies"`
-	Page       int               `json:"page"`
-	PageSize   int               `json:"page_size"`
-	Total      int64             `json:"total"`
-	TotalPages int               `json:"total_pages"`
-}
-
-type companyDetailResponse struct {
-	BusinessName  string           `json:"business_name"`
-	LicenseNumber string           `json:"license_number"`
-	Records       []officialRecord `json:"records"`
-}
-
-type officialRecord struct {
-	SourceType string        `json:"source_type"`
-	SourceName string        `json:"source_name"`
-	ObservedAt string        `json:"observed_at"`
-	Fields     []detailField `json:"fields"`
+	RCNO                  string                    `json:"rcno"`
+	SourceName            string                    `json:"source_name"`
+	SourceNameEnglish     string                    `json:"source_name_english"`
+	NormalizedName        string                    `json:"normalized_name"`
+	NormalizedNameEnglish string                    `json:"normalized_name_english"`
+	Status                string                    `json:"status"`
+	ReasonCodes           []string                  `json:"reason_codes"`
+	Evidence              []evidenceItem            `json:"evidence"`
+	ProcessedAt           string                    `json:"processed_at"`
+	ItemName              string                    `json:"item_name"`
+	ImporterName          string                    `json:"importer_name"`
+	Country               string                    `json:"country"`
+	Fields                map[string]string         `json:"fields"`
+	Groups                []detailGroup             `json:"groups"`
+	MatchingCandidates    []matchingCandidateDetail `json:"matching_candidates"`
 }
 
 type matchingCandidateDetail struct {

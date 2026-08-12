@@ -2,7 +2,6 @@ import { useId, useState } from 'react'
 import { reasonLabel } from '../format'
 import { Hint, Term } from './Hint'
 import { StatusChip } from './StatusChip'
-import { OfficialRecords } from './OfficialRecords'
 import type { Declaration, DetailGroup, MatchingCandidate } from '../types'
 
 const matchingGroupTitles = new Set(['알코올 매칭', '증류소 매칭', '리전 매칭', '매칭 이력'])
@@ -14,7 +13,6 @@ export function DetailDrawer({ declaration, onClose }: { declaration: Declaratio
   const reasons = declaration.reason_codes ?? []
   const fragments = (declaration.evidence ?? []).filter((row) => typeof row !== 'string' && row.label === '미해석 값')
   const ledger = groups.filter((group) => group.side === 'ledger')
-  const officialRecords = declaration.official_company_records ?? []
   const matching = groups.filter((group) => matchingGroupTitles.has(group.title))
   const normalized = groups.filter((group) => group.side !== 'ledger' && !matchingGroupTitles.has(group.title))
   return <div className="drawer-layer" role="presentation" onMouseDown={onClose}>
@@ -45,7 +43,7 @@ export function DetailDrawer({ declaration, onClose }: { declaration: Declaratio
       </div>
 
       {groups.length ? <div className="drawer__columns">
-        <DetailColumn kind="ledger" title="원장" caption="식약처에서 수집한 그대로" groups={ledger} officialRecords={officialRecords} emptyShown={emptyShown} />
+        <DetailColumn kind="ledger" title="원장" caption="식약처에서 수집한 그대로" groups={ledger} emptyShown={emptyShown} />
         <DetailColumn kind="normalized" title="정제 결과" caption="원장에서 갈라내 정리한 값" groups={normalized} emptyShown={emptyShown} />
         <DetailColumn kind="matching" title="매칭 후보" caption="BottleNote 기준 DB와 비교한 결과" groups={matching} matchingCandidates={declaration.matching_candidates ?? []} emptyShown={emptyShown} />
       </div> : <p className="empty-inline">표시할 값을 불러오지 못했습니다.</p>}
@@ -54,7 +52,7 @@ export function DetailDrawer({ declaration, onClose }: { declaration: Declaratio
 }
 
 // 원장, 정제, 기준 DB 비교 결과를 나란히 두고 열마다 독립적으로 탐색한다.
-function DetailColumn({ kind, title, caption, groups, matchingCandidates = [], officialRecords = [], emptyShown }: { kind: 'ledger' | 'normalized' | 'matching'; title: string; caption: string; groups: DetailGroup[]; matchingCandidates?: MatchingCandidate[]; officialRecords?: NonNullable<Declaration['official_company_records']>; emptyShown: boolean }) {
+function DetailColumn({ kind, title, caption, groups, matchingCandidates = [], emptyShown }: { kind: 'ledger' | 'normalized' | 'matching'; title: string; caption: string; groups: DetailGroup[]; matchingCandidates?: MatchingCandidate[]; emptyShown: boolean }) {
   const headingID = useId()
   const isMatchingColumn = kind === 'matching'
   return <section className={`drawer__column drawer__column--${kind}`} aria-labelledby={headingID} tabIndex={0}>
@@ -101,7 +99,6 @@ function DetailColumn({ kind, title, caption, groups, matchingCandidates = [], o
         </p>}
       </div>
     })}
-    {title === '원장' && <div className="field-group official-records-group"><h4>수입업체 공식정보</h4><p className="official-records-group__note">수입사 이름으로 현재 데이터베이스를 즉석 조회한 결과</p><OfficialRecords records={officialRecords} /></div>}
   </section>
 }
 

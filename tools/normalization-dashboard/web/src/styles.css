@@ -84,39 +84,5 @@ body:has(.drawer-layer) { overflow: hidden; }
 .panel__lead { margin: -8px 0 16px; color: #6b7889; font-size: 13px; line-height: 1.6; }
 .filter-bar__count { white-space: nowrap; }
 
-/* 수입업체 공식정보: 긴 상호와 주소가 카드 경계를 밀지 않도록 모든 텍스트를 내부에서 줄바꿈한다 */
-.company-filter label { max-width: 620px; }
-.company-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.company-card { min-width: 0; min-height: 250px; display: flex; flex-direction: column; padding: 22px; border: 1px solid #d5cbbe; background: #fffaf1; color: #223246; text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
-.company-card:hover { border-color: #b1764f; transform: translateY(-2px); box-shadow: 0 12px 26px rgba(20, 34, 54, .1); }
-.company-card__head { display: flex; justify-content: space-between; align-items: start; gap: 12px; color: #7a8697; font-size: 11px; line-height: 1.45; }
-.company-card__head span { min-width: 0; color: #8f4924; font-weight: 700; overflow-wrap: anywhere; }
-.company-card__head time { flex: none; font: 10px/1.45 "DM Mono", monospace; white-space: nowrap; }
-.company-card h2 { margin: 22px 0 9px; color: #142236; font: 800 23px/1.35 "Nanum Myeongjo", serif; letter-spacing: -.035em; overflow-wrap: anywhere; word-break: keep-all; }
-.company-card__license { margin: 0; color: #516073; font: 11px/1.6 "DM Mono", monospace; overflow-wrap: anywhere; }
-.company-card__address { flex: 1; margin: 16px 0 18px; color: #667486; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; word-break: keep-all; }
-.company-card__badges { display: flex; flex-wrap: wrap; gap: 6px; }
-.company-card__badges span { padding: 5px 8px; background: #dde5ed; color: #3f566f; font-size: 10px; font-weight: 700; white-space: nowrap; }
-.company-card__badges .positive { background: #d9e6dc; color: #2c6745; }
-.company-card__badges .warning { background: #ecd3cc; color: #884034; }
-
-.company-drawer { width: min(760px, 100%); }
-.company-drawer__notice { max-width: 620px; margin: 14px 0 20px; padding: 12px 14px; border-left: 3px solid #c47a43; background: #f1e8dc; color: #596678; font-size: 13px; line-height: 1.65; word-break: keep-all; }
-.company-drawer__body { min-height: 0; overflow-y: auto; padding: 0 30px 32px; border-top: 3px solid #c47a43; }
-.official-records { display: grid; gap: 14px; padding-top: 18px; }
-.official-record { min-width: 0; border: 1px solid #ddd3c5; background: rgba(255, 255, 255, .45); }
-.official-record > header { padding: 13px 15px; background: #18293c; color: #fff8ed; }
-.official-record > header div { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-.official-record > header span { min-width: 0; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
-.official-record > header small { flex: none; color: #aebbc9; font: 9px/1.5 "DM Mono", monospace; white-space: nowrap; }
-.official-record dl { margin: 0; padding: 0 15px 14px; }
-.official-record dl > div { min-width: 0; display: grid; grid-template-columns: minmax(105px, .42fr) 1fr; gap: 14px; padding: 10px 0; border-bottom: 1px solid #e5dcd0; }
-.official-record dl > div:last-child { border-bottom: 0; }
-.official-record dt { min-width: 0; color: #7a8697; font-size: 11px; }
-.official-record dd { min-width: 0; margin: 0; color: #223246; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; word-break: break-word; }
-.official-records__empty { margin: 12px 0; padding: 14px; background: #eee6da; color: #6b7889; font-size: 12px; line-height: 1.6; }
-.official-records-group__note { margin: 0; color: #748194; font-size: 12px; line-height: 1.55; }
-
-@media (max-width: 1050px) { .company-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1179px) { .drawer { overflow-y: auto; } .drawer__columns { flex: none; min-height: auto; grid-template-columns: 1fr; } .drawer__column { min-height: auto; overflow: visible; } .drawer__column + .drawer__column { border-left: 0; border-top: 1px solid #d8cec0; } .drawer__column--matching { order: -1; } .drawer__column-head { position: static; } }
-@media (max-width: 720px) { .company-grid { grid-template-columns: 1fr; } .company-card { min-height: 0; } .company-card__head { display: grid; } .company-card__head time { white-space: normal; } .drawer__head { padding: 20px 18px 0; } .drawer__column { padding: 0 16px 20px; } .company-drawer__body { padding: 0 18px 24px; } .official-record > header div, .official-record dl > div { grid-template-columns: 1fr; display: grid; } .official-record > header small { white-space: normal; } .hint__bubble { max-width: 220px; } }
+@media (max-width: 720px) { .drawer__head { padding: 20px 18px 0; } .drawer__column { padding: 0 16px 20px; } .hint__bubble { max-width: 220px; } }

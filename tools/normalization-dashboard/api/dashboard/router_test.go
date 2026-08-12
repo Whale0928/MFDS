@@ -180,9 +180,6 @@ func TestDeclarations_허용하지않은매칭필터와정렬값을거부한다(
 
 func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
 	queryer := &fakeQueryer{respond: func(query string, _ []any) (RowIterator, error) {
-		if strings.Contains(query, "official_detail_rows") {
-			return &fakeRows{}, nil
-		}
 		if !strings.Contains(query, "FROM mfds_declaration_details") || !strings.Contains(query, "WHERE rcno") {
 			return nil, fmt.Errorf("unexpected query")
 		}
@@ -216,70 +213,6 @@ func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
 	groups, ok := body["groups"].([]any)
 	if !ok || len(groups) == 0 {
 		t.Fatalf("groups = %#v", body["groups"])
-	}
-}
-
-func TestCompanyRecords_완료동기화의업체정보를목록으로반환한다(t *testing.T) {
-	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
-		switch {
-		case strings.Contains(query, "SELECT COUNT(*) FROM companies"):
-			if len(args) != 2 {
-				return nil, fmt.Errorf("count args = %d", len(args))
-			}
-			return &fakeRows{values: [][]any{{int64(1)}}}, nil
-		case strings.Contains(query, "FROM companies"):
-			if len(args) != 4 {
-				return nil, fmt.Errorf("list args = %d", len(args))
-			}
-			return &fakeRows{values: [][]any{{"테스트 수입사", "L-1", "수입식품등 수입판매업", "아주 긴 주소", "2026-08-10 01:00:00", int64(1), int64(0), int64(1), int64(0)}}}, nil
-		default:
-			return nil, fmt.Errorf("unexpected query")
-		}
-	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/company-records?q=%ED%85%8C%EC%8A%A4&page=1&page_size=20", nil)
-	response := httptest.NewRecorder()
-	NewServer(queryer).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
-	}
-	var body companyListResponse
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Total != 1 || len(body.Companies) != 1 || !body.Companies[0].HasBusinessLicense || !body.Companies[0].HasExcellent {
-		t.Fatalf("body = %#v", body)
-	}
-}
-
-func TestCompanyRecordDetail_업체명으로즉석조회하고공개기한을한글로표시한다(t *testing.T) {
-	payload := `{"PRCSCITYPOINT_BSSHNM":"테스트 수입사","LCNS_NO":"L-1","PUBLIC_DT":"2026/08/31 00:00:00.000000","DSPSCN":"아주 긴 처분 내용"}`
-	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
-		if !strings.Contains(query, "official_detail_rows") || len(args) != 3 || args[0] != "테스트 수입사" {
-			return nil, fmt.Errorf("unexpected query or args")
-		}
-		return &fakeRows{values: [][]any{{"DISPOSITION", "2026-08-10 01:00:00", payload}}}, nil
-	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/company-records/detail?business_name=%ED%85%8C%EC%8A%A4%ED%8A%B8+%EC%88%98%EC%9E%85%EC%82%AC&license_number=L-1", nil)
-	response := httptest.NewRecorder()
-	NewServer(queryer).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
-	}
-	var body companyDetailResponse
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	if len(body.Records) != 1 || body.Records[0].SourceName != "행정처분 결과(I0470)" {
-		t.Fatalf("body = %#v", body)
-	}
-	foundPublicUntil := false
-	for _, field := range body.Records[0].Fields {
-		if field.Label == "공개기한" && field.Value != "" {
-			foundPublicUntil = true
-		}
-	}
-	if !foundPublicUntil {
-		t.Fatalf("fields = %#v", body.Records[0].Fields)
 	}
 }
 
