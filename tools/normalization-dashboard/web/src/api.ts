@@ -1,4 +1,4 @@
-import type { Declaration, DeclarationPage, DeclarationQuery, Filters, Overview, Quality } from './types'
+import type { Declaration, DeclarationPage, DeclarationQuery, Filters, ImporterPage, ImporterQuery, Overview, Quality } from './types'
 
 const API_BASE = import.meta.env.VITE_MFDS_API_BASE ?? '/api'
 
@@ -20,5 +20,6 @@ export const api = {
   filters: () => request<Filters>('/filters'),
   declarations: (query: DeclarationQuery) => request<DeclarationPage>(`/declarations${queryString(query)}`),
   declaration: (rcno: string) => request<Declaration>(`/declarations/${encodeURIComponent(rcno)}`),
+  importers: (query: ImporterQuery) => request<ImporterPage>(`/importers${queryString(query)}`),
   quality: () => request<Quality>('/quality'),
 }

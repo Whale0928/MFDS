@@ -92,6 +92,35 @@ export interface DeclarationPage {
   page_size: number
 }
 
+export interface Importer {
+  license_no: string
+  business_name: string
+  representative_name: string
+  permit_date: string
+  institution_name: string
+  address: string
+  telephone: string
+  industry_name: string
+  closure_status_name: string
+  closure_date: string
+  observed_at: string
+  source: string
+}
+
+export interface ImporterPage {
+  importers: Importer[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export interface ImporterQuery {
+  page: number
+  page_size: number
+  q?: string
+}
+
 export interface Quality {
   monthly_collections: Array<{ month: string; count: number }>
   item_distribution: Array<{ name: string; count: number }>

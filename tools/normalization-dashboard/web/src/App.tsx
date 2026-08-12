@@ -4,11 +4,12 @@ import { date, fieldLabel, number, reasonLabel, statusLabel } from './format'
 import { BarChart } from './components/BarChart'
 import { DetailDrawer } from './components/DetailDrawer'
 import { Hint, Term } from './components/Hint'
+import { ImporterList } from './components/ImporterList'
 import { hintFor } from './glossary'
 import { StatusChip } from './components/StatusChip'
 import type { Declaration, DeclarationPage, DeclarationSort, Filters, MatchFilter, Quality, SortOrder } from './types'
 
-type Section = 'browse' | 'review' | 'quality'
+type Section = 'browse' | 'importers' | 'review' | 'quality'
 type MatchingSort = `${DeclarationSort}:${SortOrder}`
 const PAGE_SIZE = 20
 const blankFilters: Filters = { statuses: [], item_names: [], importers: [], countries: [], reason_codes: [] }
@@ -61,11 +62,12 @@ export default function App() {
   return <main className="shell">
     <header className="masthead">
       <a className="brand" href="#browse" onClick={() => setSection('browse')}><span>MFDS</span><b>수입주류 신고 원장</b><i>시연용</i></a>
-      <nav aria-label="화면 이동">{([['browse', '데이터 탐색'], ['review', '확인 필요 목록'], ['quality', '전체 통계']] as Array<[Section, string]>).map(([key, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{label}</button>)}</nav>
+      <nav aria-label="화면 이동">{([['browse', '데이터 탐색'], ['importers', '수입사 목록'], ['review', '확인 필요 목록'], ['quality', '전체 통계']] as Array<[Section, string]>).map(([key, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{label}</button>)}</nav>
       <p className="masthead__note">읽기 전용 / 이 화면에서는 아무 값도 고치지 않습니다</p>
     </header>
 
     {section === 'browse' && <BrowseView page={declarations.data} loading={declarations.loading} error={declarations.error} filters={filters.data ?? blankFilters} query={query} status={status} itemName={itemName} importer={importer} country={country} reason={reason} alcoholMatch={alcoholMatch} distilleryMatch={distilleryMatch} regionMatch={regionMatch} matchingSort={matchingSort} onQuery={setQuery} onStatus={setStatus} onItemName={setItemName} onImporter={setImporter} onCountry={setCountry} onReason={setReason} onAlcoholMatch={setAlcoholMatch} onDistilleryMatch={setDistilleryMatch} onRegionMatch={setRegionMatch} onMatchingSort={setMatchingSort} onOpen={openDetail} pageNumber={page} onPage={setPage} />}
+    {section === 'importers' && <ImporterList />}
     {section === 'review' && <ReviewView quality={quality.data} loading={quality.loading || reviews.loading} error={quality.error ?? reviews.error} declarations={reviews.data} onOpen={openDetail} pageNumber={reviewPage} onPage={setReviewPage} />}
     {section === 'quality' && <QualityView quality={quality.data} loading={quality.loading} error={quality.error} />}
 

@@ -47,6 +47,29 @@ type declarationListResponse struct {
 	Total        int64                 `json:"total"`
 	TotalPages   int                   `json:"total_pages"`
 }
+
+type importerListItem struct {
+	LicenseNo         string `json:"license_no"`
+	BusinessName      string `json:"business_name"`
+	Representative    string `json:"representative_name"`
+	PermitDate        string `json:"permit_date"`
+	InstitutionName   string `json:"institution_name"`
+	Address           string `json:"address"`
+	Telephone         string `json:"telephone"`
+	IndustryName      string `json:"industry_name"`
+	ClosureStatusName string `json:"closure_status_name"`
+	ClosureDate       string `json:"closure_date"`
+	ObservedAt        string `json:"observed_at"`
+	Source            string `json:"source"`
+}
+
+type importerListResponse struct {
+	Importers  []importerListItem `json:"importers"`
+	Page       int                `json:"page"`
+	PageSize   int                `json:"page_size"`
+	Total      int64              `json:"total"`
+	TotalPages int                `json:"total_pages"`
+}
 type declarationDetail struct {
 	RCNO                  string                    `json:"rcno"`
 	SourceName            string                    `json:"source_name"`

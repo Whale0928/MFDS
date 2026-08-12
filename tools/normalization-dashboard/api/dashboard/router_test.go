@@ -113,6 +113,80 @@ func TestDeclarations_usesReadOnlyPaginationAndSnakeCase(t *testing.T) {
 	}
 }
 
+func TestImporters_최신인허가정보를정제해페이지로응답한다(t *testing.T) {
+	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
+		switch {
+		case strings.Contains(query, "SELECT COUNT(*)"):
+			if len(args) != 3 {
+				return nil, fmt.Errorf("count args = %d", len(args))
+			}
+			return &fakeRows{values: [][]any{{int64(1)}}}, nil
+		case strings.Contains(query, "SELECT TRIM(i.license_no)"):
+			if len(args) != 5 {
+				return nil, fmt.Errorf("list args = %d", len(args))
+			}
+			return &fakeRows{values: [][]any{{"20260000001", "수입사", "대표자", "2026-01-02", "서울청", "서울시", "02-0000-0000", "수입식품등 수입판매업", "폐업", "2026-08-01", "2026-08-12T20:43:35"}}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected query: %s", query)
+		}
+	}}
+	request := httptest.NewRequest(http.MethodGet, "/api/importers?q=%EC%88%98%EC%9E%85&page=2&page_size=20", nil)
+	response := httptest.NewRecorder()
+	NewServer(queryer).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	var body importerListResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != 1 || body.Page != 2 || body.PageSize != 20 || len(body.Importers) != 1 {
+		t.Fatalf("unexpected page: %#v", body)
+	}
+	item := body.Importers[0]
+	if item.LicenseNo != "20260000001" || item.PermitDate != "2026-01-02" || item.ClosureStatusName != "폐업" || item.Source != importerSourceName {
+		t.Fatalf("unexpected importer: %#v", item)
+	}
+	for _, query := range queryer.queries {
+		upper := strings.ToUpper(query)
+		for _, forbidden := range []string{"INSERT ", "UPDATE ", "DELETE ", "REPLACE "} {
+			if strings.Contains(upper, forbidden) {
+				t.Fatalf("write query found: %s", query)
+			}
+		}
+	}
+}
+
+func TestImporters_잘못된페이지와긴검색어를거부한다(t *testing.T) {
+	for name, target := range map[string]string{
+		"page":  "/api/importers?page=0",
+		"query": "/api/importers?q=" + url.QueryEscape(strings.Repeat("가", 201)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			NewServer(&fakeQueryer{}).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestImporterSourceSQL_완료된수집의최신인허가행만사용한다(t *testing.T) {
+	for _, expected := range []string{
+		"PARTITION BY r.license_no",
+		"ORDER BY r.observed_at DESC, r.id DESC",
+		"run.status = 'COMPLETED'",
+		"r.industry_name = '수입식품등 수입판매업'",
+		"i.record_rank = 1",
+		"c.record_rank = 1",
+	} {
+		if !strings.Contains(importerCTE+importerFromSQL, expected) {
+			t.Fatalf("importer query does not contain %q", expected)
+		}
+	}
+}
+
 func TestCORS_rejectsNonLoopbackOrigin(t *testing.T) {
 	request := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
 	request.Header.Set("Origin", "http://example.test")
