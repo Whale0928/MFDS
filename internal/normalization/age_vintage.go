@@ -2,13 +2,20 @@ package normalization
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 var (
 	ageKOPattern   = regexp.MustCompile(`(\d{1,3})\s*년(?:\s|$|[)\],-])`)
 	ageENPattern   = regexp.MustCompile(`(?i)(\d{1,3})\s*(?:YO\b|YEARS?(?:\s+OLD)?\b)|\bAGED\s+(\d{1,3})\b`)
-	vintagePattern = regexp.MustCompile(`\b((?:19|20)\d{2})\b`)
+	vintagePattern = regexp.MustCompile(`\b((?:1[5-9]|20)\d{2})\b`)
+)
+
+const (
+	minimumVintageYear = 1950
+	maximumVintageYear = 2026
 )
 
 func parseAge(ko, en string, state *derivationState) {
@@ -56,13 +63,33 @@ func parseAge(ko, en string, state *derivationState) {
 }
 func parseVintage(ko, en string, state *derivationState) {
 	// Section 5.4 requires LOT, manufacture number and unlabeled code sections to be separated before a vintage is searched.
-	value := buildName(ko, baseNameMode) + " " + buildName(en, baseNameMode)
+	value := buildName(ko, baseNameMode, nil) + " " + buildName(en, baseNameMode, nil)
+	years := map[int]string{}
 	for _, match := range vintagePattern.FindAllStringSubmatch(value, -1) {
 		if len(match) != 2 {
 			continue
 		}
-		state.result.VintageRaw = match[1]
-		state.review(ReasonVintageReviewRequired, match[1])
+		year, err := strconv.Atoi(match[1])
+		if err != nil || year < minimumVintageYear || year > maximumVintageYear {
+			continue
+		}
+		years[year] = match[1]
+	}
+	if len(years) == 0 {
 		return
 	}
+	ordered := make([]int, 0, len(years))
+	for year := range years {
+		ordered = append(ordered, year)
+	}
+	sort.Ints(ordered)
+	oldest := ordered[0]
+	state.result.VintageRaw = years[oldest]
+	state.result.VintageYear = intPointer(oldest)
+	state.structured++
+	fragments := make([]string, len(ordered))
+	for index, year := range ordered {
+		fragments[index] = strconv.Itoa(year)
+	}
+	state.review(ReasonVintageReviewRequired, strings.Join(fragments, " / "))
 }

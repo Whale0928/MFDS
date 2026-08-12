@@ -6,12 +6,12 @@ import (
 )
 
 func (s *Server) quality(w http.ResponseWriter, r *http.Request) {
-	monthly, err := s.countPoints(r.Context(), `SELECT DATE_FORMAT(source_processed_date, '%Y-%m'), COUNT(*) FROM declaration_details WHERE source_processed_date IS NOT NULL GROUP BY 1 ORDER BY 1`)
+	monthly, err := s.countPoints(r.Context(), `SELECT DATE_FORMAT(source_processed_date, '%Y-%m'), COUNT(*) FROM mfds_declaration_details WHERE source_processed_date IS NOT NULL GROUP BY 1 ORDER BY 1`)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
-	items, err := s.countPoints(r.Context(), `SELECT COALESCE(source_queried_item_name, '미분류'), COUNT(*) FROM declaration_details GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`)
+	items, err := s.countPoints(r.Context(), `SELECT COALESCE(source_queried_item_name, '미분류'), COUNT(*) FROM mfds_declaration_details GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
@@ -36,12 +36,12 @@ func (s *Server) quality(w http.ResponseWriter, r *http.Request) {
 		writeDatabaseError(w, err)
 		return
 	}
-	reasons, err := s.countPoints(r.Context(), `SELECT reasons.reason_code, COUNT(*) FROM declaration_details d CROSS JOIN JSON_TABLE(CAST(d.normalization_reasons AS JSON), '$[*]' COLUMNS(reason_code VARCHAR(128) PATH '$')) AS reasons WHERE d.normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`)
+	reasons, err := s.countPoints(r.Context(), `SELECT reasons.reason_code, COUNT(*) FROM mfds_declaration_details d CROSS JOIN JSON_TABLE(CAST(d.normalization_reasons AS JSON), '$[*]' COLUMNS(reason_code VARCHAR(128) PATH '$')) AS reasons WHERE d.normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
-	queries := []string{`SELECT COALESCE(source_queried_item_name, '미분류'), COUNT(*) FROM declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, `SELECT COALESCE(importer_base_name, source_importer_name, '미분류'), COUNT(*) FROM declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, `SELECT COALESCE(source_manufacture_country_name, '미분류'), COUNT(*) FROM declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, `SELECT normalization_status, COUNT(*) FROM declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1`}
+	queries := []string{`SELECT COALESCE(source_queried_item_name, '미분류'), COUNT(*) FROM mfds_declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, `SELECT COALESCE(importer_base_name, source_importer_name, '미분류'), COUNT(*) FROM mfds_declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, `SELECT COALESCE(source_manufacture_country_name, '미분류'), COUNT(*) FROM mfds_declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, `SELECT normalization_status, COUNT(*) FROM mfds_declaration_details WHERE normalization_status IN ('REVIEW_REQUIRED', 'PARTIAL', 'UNPARSED') GROUP BY 1 ORDER BY 2 DESC, 1`}
 	dists := make([][]countPoint, len(queries))
 	for i, query := range queries {
 		dists[i], err = s.countPoints(r.Context(), query)
@@ -95,7 +95,7 @@ func (s *Server) countPoints(ctx context.Context, query string) ([]countPoint, e
 	return result, rows.Err()
 }
 func (s *Server) candidateGroups(ctx context.Context) ([]candidateGroup, error) {
-	rows, err := s.queryer.QueryContext(ctx, `SELECT COALESCE(MIN(NULLIF(sku_display_name_ko, '')), MIN(NULLIF(base_product_name_ko, '')), '이름 미정'), COALESCE(unit_volume_ml, 0), COUNT(*), COUNT(DISTINCT COALESCE(importer_base_name, source_importer_name)) FROM declaration_details WHERE sku_candidate_key_sha256 IS NOT NULL GROUP BY sku_candidate_key_sha256, unit_volume_ml HAVING COUNT(*) > 1 ORDER BY 3 DESC, 1 LIMIT 20`)
+	rows, err := s.queryer.QueryContext(ctx, `SELECT COALESCE(MIN(NULLIF(sku_display_name_ko, '')), MIN(NULLIF(base_product_name_ko, '')), '이름 미정'), COALESCE(unit_volume_ml, 0), COUNT(*), COUNT(DISTINCT COALESCE(importer_base_name, source_importer_name)) FROM mfds_declaration_details WHERE sku_candidate_key_sha256 IS NOT NULL GROUP BY sku_candidate_key_sha256, unit_volume_ml HAVING COUNT(*) > 1 ORDER BY 3 DESC, 1 LIMIT 20`)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (s *Server) candidateGroups(ctx context.Context) ([]candidateGroup, error) 
 	return result, rows.Err()
 }
 func (s *Server) duplicateObservations(ctx context.Context) ([]duplicateObservation, error) {
-	rows, err := s.queryer.QueryContext(ctx, `SELECT COALESCE(i.queried_item_name, '미분류'), COUNT(DISTINCT i.rcno), COUNT(*) FROM items i JOIN (SELECT rcno FROM items GROUP BY rcno HAVING COUNT(*) > 1) duplicated ON duplicated.rcno = i.rcno GROUP BY 1 ORDER BY 3 DESC, 1 LIMIT 20`)
+	rows, err := s.queryer.QueryContext(ctx, `SELECT COALESCE(i.queried_item_name, '미분류'), COUNT(DISTINCT i.rcno), COUNT(*) FROM mfds_items i JOIN (SELECT rcno FROM mfds_items GROUP BY rcno HAVING COUNT(*) > 1) duplicated ON duplicated.rcno = i.rcno GROUP BY 1 ORDER BY 3 DESC, 1 LIMIT 20`)
 	if err != nil {
 		return nil, err
 	}

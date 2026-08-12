@@ -12,22 +12,17 @@ import (
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/companyregistry"
+	matchingusecase "github.com/bottle-note/mfds-crawler/internal/usecase/matching"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
 
 type fakeDatabase struct {
-	pinged   bool
-	migrated bool
+	pinged bool
 }
 
 func (f *fakeDatabase) Ping(context.Context) error {
 	f.pinged = true
-	return nil
-}
-
-func (f *fakeDatabase) Migrate(context.Context) error {
-	f.migrated = true
 	return nil
 }
 
@@ -46,7 +41,7 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
-	for _, command := range []string{"collect", "sync-company-registry", "health", "migrate", "normalize"} {
+	for _, command := range []string{"collect", "collect-recent", "sync-company-registry", "health", "match", "normalize"} {
 		if !strings.Contains(output.String(), command) {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
@@ -75,22 +70,6 @@ func TestRootCommand_Health_설정과DB연결결과를출력한다(t *testing.T)
 		t.Fatal("Ping() was not called")
 	}
 	if !strings.Contains(output.String(), "health 정상: config=ok mysql=ok targets=4") {
-		t.Fatalf("output = %q", output.String())
-	}
-}
-
-func TestRootCommand_Migrate_DB를확인하고Migration을적용한다(t *testing.T) {
-	fake := &fakeDatabase{}
-	root, output := newTestRootWithDatabase(t, fake)
-	root.SetArgs([]string{"migrate"})
-
-	if err := root.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if !fake.pinged || !fake.migrated {
-		t.Fatalf("pinged=%t migrated=%t", fake.pinged, fake.migrated)
-	}
-	if !strings.Contains(output.String(), "migration 적용 완료") {
 		t.Fatalf("output = %q", output.String())
 	}
 }
@@ -124,6 +103,7 @@ func newTestRootWithRunner(
 		RunWebListJob:      runWebListJob,
 		RunCompanyRegistry: successfulCompanyRegistryCollection,
 		RunNormalization:   successfulNormalization,
+		RunMatching:        successfulMatching,
 		Out:                output,
 		ErrOut:             output,
 	})
@@ -140,6 +120,14 @@ func successfulCompanyRegistryCollection(
 	CompanyRegistrySyncCommand,
 ) (companyregistry.Summary, error) {
 	return companyregistry.Summary{}, nil
+}
+
+func successfulMatching(
+	context.Context,
+	config.Config,
+	matchingusecase.Command,
+) (matchingusecase.Summary, error) {
+	return matchingusecase.Summary{}, nil
 }
 
 func successfulNormalization(

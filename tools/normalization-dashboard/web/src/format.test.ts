@@ -15,6 +15,8 @@ describe('presentation formatters', () => {
   it('통계 항목 이름을 한글 라벨로 바꾼다', () => {
     expect(fieldLabel('abv')).toBe('알코올 도수')
     expect(fieldLabel('normalized_name')).toBe('정제된 제품 이름')
+    expect(fieldLabel('ingredient_percent')).toBe('성분 비율')
+    expect(fieldLabel('variant_marker')).toBe('제품 변형 마커')
     expect(fieldLabel('unknown_field')).toBe('unknown_field')
   })
 

@@ -82,7 +82,7 @@
 | 문자 | 용도 예시 |
 |---|---|
 | `'`, `’` | 브랜드명, 소유격 |
-| `#` | 캐스크 번호, 배치 번호 |
+| `#`, `No.` | 캐스크·배치·에디션 번호 또는 미확정 변형 마커 |
 | `(`, `)` | 구형, 에디션, 추가 설명 |
 | `-` | 합성어, 제품명 구성 |
 | `&` | 브랜드 또는 캐스크 조합 |
@@ -92,12 +92,11 @@
 | `[` , `]` | 용량, LOT, 성분 설명 |
 | `+` | 제품 조합 또는 제품명 |
 | `@` | 시리즈 번호 |
-| `°` | 도수 후보 |
 | `™` | 상표 표기 |
 
 특수문자를 모두 제거한 값은 검색 후보 생성에만 사용할 수 있다. 동일성 판정이나 자동 병합 기준으로 사용하지 않는다.
 
-실제 원장에는 `@001`, `33°`, `™`, 전각 `＆`, `㈜`, 대괄호가 존재한다. 특수문자는 문자 자체가 아니라 주변 문맥으로 해석한다.
+실제 원장에는 `@001`, `™`, 전각 `＆`, `㈜`, 대괄호가 존재한다. 특수문자는 문자 자체가 아니라 주변 문맥으로 해석한다.
 
 ## 5. 필드별 규칙
 
@@ -191,6 +190,8 @@ volume_ml          = 700
 - 확정된 `abv_percent`, `proof_value`, `CASK/BARREL STRENGTH`는 SKU 후보를 구분하는 사양 축으로 사용한다.
 - 도수가 다른 후보는 이름과 용량이 같아도 자동 병합하지 않는다.
 - 자동 범위를 벗어난 값은 오류로 버리지 않고 검토 대상으로 보낸다.
+- 성분 함량은 `ingredient_percent_raw`, `ingredient_percent`로 분리하고 `abv_percent`에 넣지 않는다.
+- 성분 퍼센트가 여러 개면 모든 퍼센트 원문만 `ingredient_percent_raw`에 보존하고 숫자 컬럼은 비우며 검토 대상으로 보낸다.
 
 ```text
 46.00%  -> 46%
@@ -209,6 +210,7 @@ volume_ml          = 700
 | 한글명 | `주도38%` | 44 | 자동 추출 |
 | 한글명 | `56도` | 43 | 자동 추출 |
 | 한글명 | 이름 끝 `52%` | 38 | 성분 단어가 없을 때 자동 추출 |
+| 한·영 이름 | `주도NN%`, `(NN%, 용량)`, `NN% 용량`, 이름 앞 `NN%VOL` | 관측 문맥 | 실제 도수 앵커가 있을 때 자동 추출 |
 
 현재 자동 추출 패턴에서 관찰된 범위는 대체로 4~69%다. `0 < 값 <= 70`은 자동 처리 가드로 사용할 수 있지만, 범위 밖의 값은 무효가 아니라 `review_required`다.
 
@@ -216,15 +218,14 @@ volume_ml          = 700
 
 | 패턴 | 조사 건수 | 처리 |
 |---|---:|---|
-| 영문명 중간 `52.3% 670ML` | 13 | 신규 문맥 규칙 전까지 검토 |
+| 영문명 중간 `52.3% 670ML` | 13 | 용량이 바로 이어지는 문맥이면 자동 추출 |
 | 영문 `100% RYE/ISLAY/POIRE` | 4 | 도수 아님 |
 | 한글명 중간 단일 `%` | 73 | 검토 |
 | 한글명에 `%`가 여러 개 | 26 | 성분 가능성이 높아 검토 |
 | 향·과즙·농축·원액·함유 문맥 | 12 | 도수로 추출하지 않음 |
 | 한글 `100%` | 3 | 마케팅·원재료 표기 |
 | 숫자 `100 PROOF` | 9 | `proof`로 보존하고 자동 환산하지 않음 |
-| `FULL/BARREL/OVERPROOF` | 22 | 제품 설명이며 숫자 도수 아님 |
-| 숫자 `°` | 2 | 검토 |
+| `BARREL STRENGTH`, `OVERPROOF` | 관측 문맥 | 제품 설명이며 숫자 도수 아님 |
 
 한·영 이름에 모두 `%`가 있는 144건 중 140건은 숫자가 일치했다. 불일치 4건은 모두 다음 유형이었다.
 
@@ -233,7 +234,9 @@ volume_ml          = 700
 영문명: LOW LIQUOR 42%
 ```
 
-한글명의 첫 `%`를 사용하면 도수가 `0.45%`로 오수집된다. 성분 문맥을 먼저 배제하고, 명시적인 영문 도수 패턴을 우선한다.
+한글명의 첫 `%`를 사용하면 도수가 `0.45%`로 오수집된다. 인삼·향료·과즙·농축액·원액·추출물·주스·시럽·곡물 등 성분 문맥을 먼저 분리하고, `주도`, 용량 결합, `%VOL` 같은 실제 도수 앵커를 우선한다.
+
+`CASK STRENGTH`, `BARREL STRENGTH`와 관측 오타 `STRENGHT`, `STRENGH`, `STRENCH`는 각각 canonical `STRENGTH`로 저장한다. `CS`는 반대 언어에 `CASK STRENGTH` 또는 명확한 한글 캐스크·배럴 스트렝스가 있을 때만 `strength_type`으로 확정한다. 단독 `CS`는 `STRENGTH_ABBREVIATION` 변형 마커와 검토 사유로 남긴다. 실측 근거가 없는 `FULL STRENGTH`, `N°`, `°` 규칙은 추가하지 않는다.
 
 실제 데이터에는 기본명·용량·숙성이 같고 도수만 다른 그룹이 27개 있다. 카발란 솔리스트 올로로소 쉐리캐스크는 51.6~57.1%, 금문고량주 600ml는 38%와 58%로 나뉘므로 도수 축을 생략하면 서로 다른 제품 후보가 병합된다.
 
@@ -253,7 +256,7 @@ DT 언 아일라 2008       -> 빈티지 후보
 가쿠빈 1920ML           -> 용량
 ```
 
-네 자리 숫자는 `vintage_year` 후보로만 보내고 다른 문맥 증거 없이 자동 확정하지 않는다. `발베니 12년-700ML(제조번호 : L 0113953 2006)`의 `2006`처럼 LOT 내부 숫자를 빈티지로 사용하면 안 된다.
+네 자리 숫자는 결정적 범위 `1950..2026` 안에서만 `vintage_year` 후보로 보존하고 검토 사유를 유지한다. 여러 타당 연도가 있으면 가장 오래된 연도를 선택하고 전체 후보를 검토 근거에 남긴다. `1500`, `1792`, `1800`, `1907`, `1920`, `1942`, `2099` 같은 브랜드·비현실 범위 숫자와 `발베니 12년-700ML(제조번호 : L 0113953 2006)`의 LOT 내부 숫자는 빈티지로 사용하지 않는다.
 
 ### 5.5 LOT·제조번호·코드
 
@@ -280,9 +283,12 @@ LOT은 제품 SKU가 아니라 특정 제조 배치를 식별하는 번호다. L
 | 괄호 안 6자리 숫자 | 수입사 자재코드 후보, SKU 사양에 유지 | 코드별 수입사·제품명·용량이 반복적으로 고정 |
 | 슬래시 뒤 6~7자리 숫자 | 자재코드 후보, SKU 사양에 유지 | 1,470행·10개 수입사에서 반복 |
 | SMWS `NNNNNNGX...` | 단일 캐스크 제품 식별 코드로 유지 | 코드가 다른 30종이 기본명 하나로 수렴 |
-| `#숫자`와 `SINGLE CASK` 문맥 | 캐스크 번호로 유지 | 같은 도수에서도 `#9485`, `#9482`가 제품을 구분 |
-| `#숫자`의 기타 문맥 | 검토 | 배치·시리즈·캐스크 번호가 혼용됨 |
-| `BATCH n` | 양쪽 언어 또는 제품군 근거가 있으면 유지 | 한쪽 이름에만 있으면 검토 |
+| `#숫자`, `No. 숫자`와 `SINGLE CASK/CASK` 문맥 | 캐스크 번호로 유지 | 같은 도수에서도 `#9485`, `#9482`가 제품을 구분 |
+| `#숫자`, `No. 숫자`와 `BATCH/EDITION` 문맥 | 해당 배치·에디션 필드로 유지 | 문맥과 숫자 원문을 함께 보존 |
+| `@숫자`, `SERIES 숫자` | `SERIES_NUMBER` 변형 마커로 유지 | 시리즈 번호가 제품을 구분할 수 있음 |
+| 숫자 마커의 기타 문맥 | `UNKNOWN` 변형 마커와 검토 | 미확정 마커를 이름·SKU 후보 키에서 제거하지 않음 |
+| `BATCH n` | 숫자만 배치로 유지 | 한 언어만 명확해도 보존하며 양쪽 숫자가 다를 때만 검토 |
+| `SMALL BATCH` | 제품명으로 유지 | 숫자 없는 제품 설명을 배치 번호로 해석하지 않음 |
 
 예시:
 
@@ -301,7 +307,7 @@ LOT은 제품 SKU가 아니라 특정 제조 배치를 식별하는 번호다. L
 
 같은 LOT 코드가 여러 RCNO에 나타날 수 있으므로 LOT과 RCNO는 1:1 관계가 아니다. 반대로 6~7자리 자재코드와 단일 캐스크 번호는 제품 후보를 구분할 수 있으므로 LOT으로 제거하면 안 된다.
 
-`BATCH PROOF`, 숫자 `PROOF`, `CASK/BARREL STRENGTH`, 캐스크 번호, 자재코드, 에디션명은 판매 제품을 구분할 수 있으므로 LOT 제거 규칙을 적용하지 않는다.
+`BATCH PROOF`, 숫자 `PROOF`, `CASK/BARREL STRENGTH`, 캐스크 번호, 자재코드, 에디션명은 판매 제품을 구분할 수 있으므로 LOT 제거 규칙을 적용하지 않는다. 에디션 qualifier는 에디션 직전의 제한된 토큰만 캡처하며 이름 전체를 greedy 캡처하지 않는다. 한 언어에만 명확한 에디션이 있어도 보존하고 양쪽의 실제 숫자 값이 충돌할 때만 검토한다.
 
 ### 5.6 소비기한
 
@@ -423,7 +429,7 @@ RCNO, LOT·제조번호, 박스 입수량은 제품 식별 키에서 제외한�
 | 한글 `구형` | 최신 RCNO 6건 | 한글 전용 버전 주석 |
 | `구형`과 영문 `OLD` 직접 대응 | 0건 | 자동 번역·치환 금지 |
 | 영문 `OLD` | 272건 | 숙성 표현 또는 고유명 |
-| `EDITION/에디션` 합집합 | 122건, 양쪽 동시 71건 | 단독 판정 금지, 언어 대조 |
+| `EDITION/에디션` 합집합 | 122건, 양쪽 동시 71건 | 한 언어만 명확해도 보존하고 값 충돌만 검토 |
 | 같은 키에서 도수만 다른 제품군 | 27개 | ABV·PROOF·STRENGTH 축 필요 |
 | 동일 영문명의 복수 용량 | 118개 이름군·1,265 RCNO | 병 용량 키 필요 |
 | 라벨 없는 LOT에 의한 과분할 | 375행·30개 제품군 | 접미 `L` 코드 분리 |
@@ -451,6 +457,8 @@ unit_volume_ml
 package_count
 abv_raw
 abv_percent
+ingredient_percent_raw
+ingredient_percent
 proof_raw
 proof_value
 strength_type
@@ -459,6 +467,9 @@ age_years
 vintage_year
 version_marker
 edition_name
+variant_marker_raw
+variant_marker_type
+variant_marker_value
 material_code
 cask_number
 batch_number
@@ -502,7 +513,11 @@ MATERIAL_CODE_PRESERVED_FOR_SKU
 CASK_NUMBER_PRESERVED_FOR_SKU
 PACKAGE_COUNT_EXCLUDED_FROM_BOTTLE_SKU
 KO_VERSION_MARKER_WITHOUT_ENGLISH_MAPPING
-EDITION_TOKEN_LANGUAGE_MISMATCH
+INGREDIENT_PERCENT_MULTIPLE_VALUES
+VARIANT_MARKER_AMBIGUOUS
+STRENGTH_ABBREVIATION_AMBIGUOUS
+BATCH_VALUE_CONFLICT
+EDITION_VALUE_CONFLICT
 GENERIC_PRODUCT_NAME_REVIEW_REQUIRED
 PARENTHESIS_SEMANTIC_TEXT
 ```
@@ -511,23 +526,23 @@ PARENTHESIS_SEMANTIC_TEXT
 
 ### 8.1 테이블 역할
 
-`declarations`는 RCNO별 정제 결과를 관리하는 현재 상태 테이블이다.
+`mfds_declarations`는 RCNO별 정제 결과를 관리하는 현재 상태 테이블이다.
 
-- `items`: 같은 RCNO의 반복 관찰을 모두 보존하는 불변 원장 이력
-- `declarations`: RCNO당 1행인 원본 참조와 정제 결과
-- `source_item_id`: 정제 근거로 선택한 최신 `items.id`
-- `declaration_details`: 원본과 정제 결과를 함께 보여주는 조회 View
+- `mfds_items`: 같은 RCNO의 반복 관찰을 모두 보존하는 불변 원장 이력
+- `mfds_declarations`: RCNO당 1행인 원본 참조와 정제 결과
+- `source_item_id`: 정제 근거로 선택한 최신 `mfds_items.id`
+- `mfds_declaration_details`: 원본과 정제 결과를 함께 보여주는 조회 View
 - 정제 컬럼: 소스 값에서 파생한 제품·용량·도수·숙성·LOT 정보
 - 검토 컬럼: 자동 정제 상태와 휴먼 리뷰 결과
 
-원본 값은 `declarations`에 복제하지 않는다. 일반 조회에서는 `declaration_details` View를 사용하고, 원본 관찰 이력 전체가 필요할 때만 `items`를 직접 조회한다.
+원본 값은 `mfds_declarations`에 복제하지 않는다. 일반 조회에서는 `mfds_declaration_details` View를 사용하고, 원본 관찰 이력 전체가 필요할 때만 `mfds_items`를 직접 조회한다.
 
-FK는 두지 않는다. `source_item_id`는 추적용 논리 참조이며 RCNO 유일성만 DB에서 강제한다. `items`는 불변 원장이므로 참조된 행을 수정하거나 삭제하지 않는다.
+FK는 두지 않는다. `source_item_id`는 추적용 논리 참조이며 RCNO 유일성만 DB에서 강제한다. `mfds_items`는 불변 원장이므로 참조된 행을 수정하거나 삭제하지 않는다.
 
 ### 8.2 DDL
 
 ```sql
-CREATE TABLE declarations
+CREATE TABLE mfds_declarations
 (
     id                                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     rcno                              VARCHAR(32) NOT NULL,
@@ -547,6 +562,8 @@ CREATE TABLE declarations
     package_count                     INT UNSIGNED NULL,
     abv_raw                           VARCHAR(255) NULL,
     abv_percent                       DECIMAL(6, 3) NULL,
+    ingredient_percent_raw            TEXT NULL,
+    ingredient_percent                DECIMAL(6, 3) NULL,
     proof_raw                         VARCHAR(255) NULL,
     proof_value                       DECIMAL(7, 3) NULL,
     strength_type                     VARCHAR(64) NULL,
@@ -556,6 +573,9 @@ CREATE TABLE declarations
     vintage_year                      SMALLINT UNSIGNED NULL,
     version_marker                    VARCHAR(64) NULL,
     edition_name                      TEXT NULL,
+    variant_marker_raw                VARCHAR(255) NULL,
+    variant_marker_type               VARCHAR(64) NULL,
+    variant_marker_value              VARCHAR(255) NULL,
     material_code                     VARCHAR(255) NULL,
     cask_number                       VARCHAR(255) NULL,
     batch_number                      VARCHAR(255) NULL,
@@ -621,7 +641,7 @@ CREATE TABLE declarations
     KEY idx_declarations_country (manufacture_country_alpha2, export_country_alpha2)
 ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC COMMENT='RCNO별 원본 참조와 비파괴 정제 결과';
 
-CREATE VIEW declaration_details AS
+CREATE VIEW mfds_declaration_details AS
 SELECT d.*,
        i.job_id                        AS source_job_id,
        i.task_id                       AS source_task_id,
@@ -648,18 +668,18 @@ SELECT d.*,
        i.parser_version                AS source_parser_version,
        i.parser_warning                AS source_parser_warning,
        i.observed_at                   AS source_observed_at
-FROM declarations AS d
-JOIN items AS i ON i.id = d.source_item_id;
+FROM mfds_declarations AS d
+JOIN mfds_items AS i ON i.id = d.source_item_id;
 ```
 
 ### 8.3 컬럼 계약
 
 #### 원본 참조 컬럼
 
-- `source_item_id`는 RCNO의 최신 관찰 `items.id`다.
-- `source_item_id`가 가리키는 `items.rcno`는 `declarations.rcno`와 같아야 한다.
-- 원본 컬럼은 `declaration_details` View에서 `source_*` 이름으로 노출한다.
-- View의 원본 HTML과 해시는 `items` 값을 그대로 보여주며 복제하거나 재생성하지 않는다.
+- `source_item_id`는 RCNO의 최신 관찰 `mfds_items.id`다.
+- `source_item_id`가 가리키는 `mfds_items.rcno`는 `mfds_declarations.rcno`와 같아야 한다.
+- 원본 컬럼은 `mfds_declaration_details` View에서 `source_*` 이름으로 노출한다.
+- View의 원본 HTML과 해시는 `mfds_items` 값을 그대로 보여주며 복제하거나 재생성하지 않는다.
 - FK가 없으므로 애플리케이션과 검증 쿼리에서 고아 참조가 0건인지 확인한다.
 
 #### 제품 식별 컬럼
@@ -668,7 +688,9 @@ JOIN items AS i ON i.id = d.source_item_id;
 - `sku_display_name_*`는 베이스 제품명, 확정된 제품 변형과 정규화된 병 용량을 포함한 표시명이다.
 - 원문에서 분리한 에디션·버전·캐스크 표현은 구조화 컬럼과 `sku_display_name_*`에 보존하며 의미를 삭제하지 않는다.
 - `sku_candidate_key_sha256`는 SKU 후보 그룹 검색용이며 unique key가 아니다.
-- `sku_candidate_key_sha256` 후보에는 제품군, `unit_volume_ml`, 숙성·빈티지·도수·PROOF·STRENGTH·버전·에디션·자재·캐스크·배치의 확정값을 사용한다.
+- `sku_candidate_key_sha256` 후보에는 제품군, `unit_volume_ml`, 숙성·빈티지·도수·PROOF·STRENGTH·버전·에디션·자재·캐스크·배치와 보존된 변형 마커를 사용한다.
+- `variant_marker_raw/type/value`는 `#`, `@`, `No.` 숫자와 단독 `CS`의 원문·문맥·값을 분리한다. `UNKNOWN`, `STRENGTH_ABBREVIATION`은 `base_product_name_*`, `alcohol_name_*`, 후보 키에서 제거하지 않는다.
+- `ingredient_percent_raw/ingredient_percent`는 성분 함량 전용이며 `abv_raw/abv_percent`와 섞지 않는다. 다중 성분 값은 raw만 저장한다.
 - 용량이 확인되면 `unit_volume_ml`은 SKU 식별 요소에 반드시 포함하고 `package_count`는 제외한다.
 - LOT·제조번호와 RCNO는 `sku_candidate_key_sha256`에 포함하지 않는다.
 - 키 구성 요소가 미상이면 확인된 값과 동일하다고 간주하지 않는다. 이때는 `sku_candidate_key_sha256`을 생성하지 않아 확정된 SKU와 자동으로 묶이지 않게 한다.
@@ -693,12 +715,12 @@ JOIN items AS i ON i.id = d.source_item_id;
 
 - `review_status`는 `NOT_REQUIRED`, `PENDING`, `APPROVED`, `REJECTED`를 사용한다.
 - 정제 결과가 `REVIEW_REQUIRED`이면 `review_status`를 `PENDING`으로 변경한다.
-- 리뷰는 정제값을 덮어쓸 수 있지만 `source_item_id`와 `items` 원본은 수정하지 않는다.
+- 리뷰는 정제값을 덮어쓸 수 있지만 `source_item_id`와 `mfds_items` 원본은 수정하지 않는다.
 - 사람이 수정한 값은 `reviewed_by`, `reviewed_at`, `review_note`로 근거를 남긴다.
 
 ### 8.4 생성과 갱신 규칙
 
-초기 생성은 `items`에서 RCNO별 최신 1행을 선택하여 수행한다.
+초기 생성은 `mfds_items`에서 RCNO별 최신 1행을 선택하여 수행한다.
 
 ```sql
 ROW_NUMBER() OVER (
@@ -709,12 +731,14 @@ ROW_NUMBER() OVER (
 
 신규 관찰 처리 규칙은 다음과 같다.
 
-1. RCNO가 없으면 최신 `items.id`를 `source_item_id`로 지정하고 `UNPARSED`로 생성한다.
+1. RCNO가 없으면 최신 `mfds_items.id`를 `source_item_id`로 지정하고 `UNPARSED`로 생성한다.
 2. RCNO가 있고 의미 해시가 같으면 `source_item_id`만 최신 관찰 행으로 갱신한다.
 3. RCNO가 있고 의미 해시가 다르면 `source_item_id`를 최신 관찰 행으로 바꾸고 `normalization_status = 'STALE'`로 변경한다.
 4. 정제 작업은 `UNPARSED` 또는 `STALE` 행을 처리한다.
 5. 자동 확정할 수 없는 토큰은 원문을 유지하고 `REVIEW_REQUIRED`, `review_status = 'PENDING'`, 사유를 기록한다.
-6. 어떤 경우에도 `items` 이력을 삭제하거나 갱신하지 않는다.
+6. 어떤 경우에도 `mfds_items` 이력을 삭제하거나 갱신하지 않는다.
+
+`mfds-normalization-v3` 전환 data migration은 `mfds-normalization-v2` 결과만 `STALE`로 바꾸고 claim 필드를 초기화한다. v2가 해외제조업소명에서 만든 증류소 후보는 `NULL`로 정리한다. DDL과 data backfill은 별도 migration으로 실행하며 둘 다 재실행 시 같은 결과를 유지한다. `00007` Down은 비가역 data update의 실행 성공만 보장하는 no-op이며, 성공 rollback이 덮어쓴 v2 상태·claim·증류소 후보를 원상복구한다는 뜻이 아니다.
 
 원본 참조와 정제 갱신은 한 트랜잭션에서 수행한다. 정제 도중 실패하면 이전 정제값을 유지하고 상태와 오류 근거를 남긴다.
 
@@ -730,8 +754,8 @@ ROW_NUMBER() OVER (
 | 구분 | 대상 |
 |---|---|
 | 자동 처리 | 단위 대소문자, 천 단위 쉼표, 소수 리터, 명시적 묶음 수량 분리, 강한 도수 문맥, 숙성 표기 통일, 명시 LOT, 소비기한 4개 형태 |
-| 조건부 구조화 | `SINGLE CASK`의 `#번호`, 반복 검증된 자재코드, 양쪽 언어의 `BATCH n`, 영문이 같은 음차 표기 차이 |
-| 검토 | 이름 중간 `%`, `PROOF`, `°`, 한쪽 언어만의 에디션·피니시·배치, `SINGLE CASK` 밖의 `#번호`, 복합 괄호, 네 자리 연도, 언어 간 도수 충돌, `구형` 대응 후보 |
+| 조건부 구조화 | `SINGLE CASK/CASK`의 숫자 마커, 숫자 `BATCH n`, 제한된 에디션 qualifier, 실제 도수 앵커, 반복 검증된 자재코드, 영문이 같은 음차 표기 차이 |
+| 검토 | 이름 중간의 앵커 없는 `%`, `PROOF`, 단독 `CS`, `UNKNOWN` 숫자 마커, 복합 괄호, 빈티지 후보, 언어 간 도수·배치·에디션 값 충돌, 다중 성분 퍼센트, `구형` 대응 후보 |
 | 제품키 제외 | RCNO, 명시 LOT·제조번호, 패턴이 확인된 접미 `L` 코드, 박스 입수량, 제조국·수출국 |
 | 변형 금지 | 원문 HTML, 제조국·수출국 병합, 의미 특수문자 일괄 제거, 성분 `%`의 도수 변환, `구형↔OLD` 치환, `NEW/LEGACY/RESERVE/CLASSIC` 일괄 제거, 정규화 키 자동 병합 |
 
@@ -746,13 +770,14 @@ ROW_NUMBER() OVER (
 | 직접 정제 | `alcohol_region_ko`, `alcohol_region_en` | 제조국을 지역 1단계 후보로 사용 |
 | 직접 정제 | `alcohol_abv` | 명시적으로 확정된 `abv_percent`를 `%` 문자열로 변환 |
 | 후보 | `cask_candidate` | 제품명에 캐스크 종류가 명시된 경우에만 추출 |
-| 후보 | `distillery_name_ko_candidate`, `distillery_name_en_candidate` | 해외제조업소명을 증류소로 확정하지 않고 언어별 후보로 보존 |
+| 후보 | `distillery_name_ko_candidate`, `distillery_name_en_candidate` | 현재 자동 생성하지 않으며 향후 `distilleries` 사전과 제품명을 대조할 때만 사용 |
 
 - 제조국과 수출국은 각각 한글명, 영문명, ISO 3166-1 Alpha-2, Alpha-3를 저장한다.
 - 현재 원장에 존재하는 61개 국가명을 정적 카탈로그로 관리한다.
 - 제조국은 BottleNote 지역 후보에 사용하지만 수출국은 지역 후보에 사용하지 않는다.
 - 매핑되지 않은 국가나 품목은 추정하지 않고 `REVIEW_REQUIRED` 사유를 기록한다.
 - `cask_number`는 캐스크 번호이고 `cask_candidate`는 캐스크 종류이므로 서로 대체하지 않는다.
+- 해외제조업소명은 증류소가 아닐 수 있으므로 제품명 근거나 사전 조회 없이 증류소 후보로 복사하지 않는다.
 
 ## 10. 변경과 검증 원칙
 
@@ -771,6 +796,8 @@ ROW_NUMBER() OVER (
 4,000ml                         -> 4000ml, 000ml 금지
 250ML*2                         -> 250ml × 2, 병 SKU 키에는 250ml만 사용
 설원 인삼송이주(인삼0.45%)     -> 0.45%를 ABV로 사용 금지
+인삼0.45%, 향료0.02%           -> ingredient raw만 저장, 검토
+주도38% / (40%,700ml) / 40%VOL -> 실제 도수 앵커로 ABV 저장
 LOW LIQUOR 42%                  -> ABV 42 후보
 KILCHOMAN 100% ISLAY            -> ABV 사용 금지
 가쿠빈 1920ML                   -> vintage_year 사용 금지
@@ -782,6 +809,9 @@ NEW RIFF                        -> NEW 제거 금지
 싱글 몰트 ... / 135066GX0700615 -> 캐스크·자재코드 유지
 조니워커 700ml (778061) L5293   -> 자재코드 유지, L코드 LOT 분리
 싱글캐스크 (#9485)              -> cask_number 유지
+위스키 #77 / @001               -> UNKNOWN/SERIES_NUMBER 원문과 후보 키 유지
+CS / CASK STRENGHT              -> 단독 CS 검토, 관측 오타는 CASK STRENGTH alias
+SMALL BATCH / BATCH 3           -> 전자는 이름 유지, 후자는 숫자 배치로 구조화
 카발란 동일명 51.6% / 57.1%     -> 다른 SKU 후보
 고량주 250ml × 20 / × 36        -> 같은 병 SKU 후보, 입수량 제외
 스트렝스 / 스트랭스             -> 영문 동일할 때만 검색키 통일

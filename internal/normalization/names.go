@@ -23,13 +23,14 @@ var (
 	proofTokenPattern    = regexp.MustCompile(`(?i)^\d+(?:\.\d+)?\s*(?:PROOF|프루프)$`)
 	ageTokenPattern      = regexp.MustCompile(`(?i)^(?:\d{1,3}\s*(?:년|YO|YEARS?(?:\s+OLD)?)|AGED\s+\d{1,3})$`)
 	caskTokenPattern     = regexp.MustCompile(`^#\s*\d+$`)
-	batchTokenPattern    = regexp.MustCompile(`(?i)^(?:BATCH|배치)\s*#?\s*[A-Z0-9-]+$`)
-	strengthTokenPattern = regexp.MustCompile(`(?i)^(?:(?:CASK|BARREL|FULL)\s+STRENGTH|OVERPROOF)$`)
+	batchTokenPattern    = regexp.MustCompile(`(?i)^(?:BATCH|배치)\s*(?:(?:#|NO\.?)\s*)?\d+$`)
+	strengthTokenPattern = regexp.MustCompile(`(?i)^(?:(?:CASK|BARREL)\s+(?:STRENGTH|STRENGHT|STRENGH|STRENCH)|OVERPROOF|캐스크\s*(?:스트렝스|스트랭스)|(?:배럴|바렐)\s*(?:스트렝스|스트랭스))$`)
 	labeledLotToken      = regexp.MustCompile(`(?i)^(?:LOT\s*NO\.?|LOTE|제조번호)\s*[:.]?\s*[A-Z0-9]`)
 	dateCodeToken        = regexp.MustCompile(`^\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?$`)
 	materialCodeToken    = regexp.MustCompile(`^(?:\d{6,}|[A-Z0-9]*GX[A-Z0-9]+)$`)
 	bareLotToken         = regexp.MustCompile(`^L[\s.-]?[A-Z0-9]+(?:[\s.-][A-Z0-9]+)*$`)
 	opaqueCodeToken      = regexp.MustCompile(`^[A-Z0-9]{1,4}[\s.-]?[A-Z0-9]{4,}$`)
+	degreeValuePattern   = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*도`)
 )
 
 // nameMode selects which confirmed variant tokens a derived name drops. Volume, ABV, LOT and code tokens always drop.
@@ -143,6 +144,10 @@ func isExcludedCode(token string) bool {
 		materialCodeToken.MatchString(token) || isCodeToken(token)
 }
 func isConfirmedABVToken(token string, abv float64) bool {
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" || trimmed[0] < '0' || trimmed[0] > '9' {
+		return false
+	}
 	match := abvTokenPattern.FindStringSubmatch(token)
 	if len(match) == 0 || !strings.Contains(token, "%") {
 		return false
@@ -160,20 +165,22 @@ func standardVolume(token string, volume *volumeMatch) string {
 	}
 	return display
 }
-func baseName(value string) string { return buildName(value, baseNameMode) }
+func baseName(value string, abv *float64, confirmedVariant string) string {
+	return buildName(value, baseNameMode, abv, confirmedVariant)
+}
 
 // buildName parses the name into bracket groups and separator-delimited tokens, classifies each one,
 // then reassembles. A bracket group leaves or stays with both brackets, so a pair is never broken.
-func buildName(value string, mode nameMode) string {
+func buildName(value string, mode nameMode, abv *float64, confirmedVariants ...string) string {
 	rebuilt := strings.Builder{}
 	for _, segment := range splitNameSegments(value) {
 		switch {
-		case segment.group && droppableGroup(segment.inner, mode):
+		case segment.group && droppableGroup(segment.inner, mode, abv, confirmedVariants...):
 			rebuilt.WriteString(removalMark)
 		case segment.group:
 			rebuilt.WriteString(segment.text)
 		default:
-			rebuilt.WriteString(rebuildTokens(segment.text, mode))
+			rebuilt.WriteString(rebuildTokens(segment.text, mode, abv, confirmedVariants...))
 		}
 	}
 	cleaned := markCleanupPattern.ReplaceAllString(rebuilt.String(), " ")
@@ -266,24 +273,24 @@ func groupTokens(inner string) []string {
 	tokens, _ := splitTokens(inner, ",/")
 	return tokens
 }
-func droppableGroup(inner string, mode nameMode) bool {
+func droppableGroup(inner string, mode nameMode, abv *float64, confirmedVariants ...string) bool {
 	for _, token := range groupTokens(inner) {
-		if !droppableToken(token, mode) {
+		if !droppableToken(token, mode, abv, confirmedVariants...) {
 			return false
 		}
 	}
 	return true
 }
-func rebuildTokens(value string, mode nameMode) string {
+func rebuildTokens(value string, mode nameMode, abv *float64, confirmedVariants ...string) string {
 	tokens, joins := splitTokens(value, ",/")
 	rebuilt := strings.Builder{}
 	lastKept := -1
 	for index, token := range tokens {
-		if droppableToken(token, mode) {
+		if droppableToken(token, mode, abv, confirmedVariants...) {
 			continue
 		}
 		rebuilt.WriteString(separatorFor(joins, lastKept, index))
-		rebuilt.WriteString(stripTokens(token, mode))
+		rebuilt.WriteString(stripTokens(token, mode, abv, confirmedVariants...))
 		lastKept = index
 	}
 	if lastKept < 0 {
@@ -291,12 +298,14 @@ func rebuildTokens(value string, mode nameMode) string {
 	}
 	return rebuilt.String()
 }
-func droppableToken(value string, mode nameMode) bool {
+func droppableToken(value string, mode nameMode, abv *float64, confirmedVariants ...string) bool {
 	token := strings.TrimSpace(value)
 	switch {
 	case token == "":
 		return true
-	case volumeTokenPattern.MatchString(token), packageTokenOnly.MatchString(token), abvTokenPattern.MatchString(token):
+	case volumeTokenPattern.MatchString(token), packageTokenOnly.MatchString(token):
+		return true
+	case abv != nil && isConfirmedABVPhrase(token, *abv):
 		return true
 	case labeledLotToken.MatchString(token), dateCodeToken.MatchString(token), materialCodeToken.MatchString(token):
 		return true
@@ -306,7 +315,7 @@ func droppableToken(value string, mode nameMode) bool {
 		return true
 	case mode.age && ageTokenPattern.MatchString(token):
 		return true
-	case mode.cask && caskTokenPattern.MatchString(token):
+	case mode.cask && isConfirmedVariantToken(token, confirmedVariants):
 		return true
 	case mode.batch && batchTokenPattern.MatchString(token):
 		return true
@@ -338,11 +347,10 @@ func isCodeToken(value string) bool {
 }
 
 // stripTokens removes confirmed tokens inside a kept token and marks each removal for separator cleanup.
-func stripTokens(value string, mode nameMode) string {
+func stripTokens(value string, mode nameMode, abv *float64, confirmedVariants ...string) string {
 	value = packageTokenPattern.ReplaceAllString(value, "${1}")
+	value = removeConfirmedABV(value, abv)
 	value = volumePattern.ReplaceAllString(value, "${1}"+removalMark)
-	value = strongABVPattern.ReplaceAllString(value, "${2}"+removalMark)
-	value = koABVPattern.ReplaceAllString(value, removalMark)
 	value = lotPattern.ReplaceAllString(value, removalMark)
 	value = manufacturePattern.ReplaceAllString(value, removalMark)
 	value = lotSuffixPattern.ReplaceAllString(value, removalMark)
@@ -357,17 +365,68 @@ func stripTokens(value string, mode nameMode) string {
 		value = ageKOPattern.ReplaceAllString(value, removalMark)
 		value = ageENPattern.ReplaceAllString(value, removalMark)
 	}
-	if mode.cask {
-		value = caskPattern.ReplaceAllString(value, removalMark)
-	}
 	if mode.batch {
 		value = batchENPattern.ReplaceAllString(value, removalMark)
 		value = batchKOPattern.ReplaceAllString(value, removalMark)
+	}
+	if mode.cask {
+		for _, marker := range confirmedVariants {
+			if marker != "" {
+				value = strings.ReplaceAll(value, marker, removalMark)
+			}
+		}
 	}
 	if mode.version {
 		value = strings.ReplaceAll(value, "구형", removalMark)
 	}
 	return value
+}
+
+func removeConfirmedABV(value string, abv *float64) string {
+	if abv == nil {
+		return value
+	}
+	return strongABVPattern.ReplaceAllStringFunc(value, func(match string) string {
+		if occurrence, ok := percentOrDegreeOccurrence(match); ok && occurrence.value == *abv {
+			return removalMark
+		}
+		return match
+	})
+}
+
+func isConfirmedABVPhrase(value string, abv float64) bool {
+	if isConfirmedABVToken(value, abv) {
+		return true
+	}
+	match := strongABVPattern.FindString(value)
+	if strings.TrimSpace(match) != strings.TrimSpace(value) {
+		return false
+	}
+	occurrence, ok := percentOrDegreeOccurrence(match)
+	return ok && occurrence.value == abv
+}
+
+func percentOrDegreeOccurrence(value string) (percentOccurrence, bool) {
+	if match := percentPattern.FindStringSubmatch(value); len(match) == 2 {
+		parsed, err := strconv.ParseFloat(match[1], 64)
+		return percentOccurrence{value: parsed}, err == nil
+	}
+	degree := degreeValuePattern.FindStringSubmatch(value)
+	if len(degree) != 2 {
+		return percentOccurrence{}, false
+	}
+	parsed, err := strconv.ParseFloat(degree[1], 64)
+	return percentOccurrence{value: parsed}, err == nil
+}
+
+func isConfirmedVariantToken(token string, confirmedVariants []string) bool {
+	trimmed := strings.TrimSpace(token)
+	for _, marker := range confirmedVariants {
+		if marker != "" && trimmed == strings.TrimSpace(marker) {
+			return true
+		}
+	}
+	return false
 }
 func searchKey(value string) string {
 	value = strings.NewReplacer("’", "'", "‘", "'", "–", "-", "—", "-", "－", "-").Replace(value)
@@ -399,13 +458,25 @@ func isGenericProductName(result Result) bool {
 	return ok
 }
 func candidateHash(result Result) string {
-	canonical := []string{result.NameSearchKeyKO, result.NameSearchKeyEN, intString(result.UnitVolumeML), intString(result.AgeYears), floatString(result.ABVPercent), floatString(result.ProofValue), result.StrengthType, result.VersionMarker, result.EditionName, result.MaterialCode, result.CaskNumber, result.BatchNumber}
+	variantRaw, variantType, variantValue := variantHashComponents(result)
+	canonical := []string{result.NameSearchKeyKO, result.NameSearchKeyEN, intString(result.UnitVolumeML), intString(result.AgeYears), intString(result.VintageYear), floatString(result.ABVPercent), floatString(result.ProofValue), result.StrengthType, result.VersionMarker, result.EditionName, result.MaterialCode, result.CaskNumber, result.BatchNumber, variantRaw, variantType, variantValue}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""
 	}
 	hash := sha256.Sum256(encoded)
 	return hex.EncodeToString(hash[:])
+}
+
+func variantHashComponents(result Result) (string, string, string) {
+	switch result.VariantMarkerType {
+	case VariantMarkerTypeUnknown, VariantMarkerTypeStrengthAbbreviation:
+		return result.VariantMarkerRaw, result.VariantMarkerType, result.VariantMarkerValue
+	case VariantMarkerTypeSeriesNumber:
+		return "", result.VariantMarkerType, canonicalNumeric(result.VariantMarkerValue)
+	default:
+		return "", "", ""
+	}
 }
 func cleanCode(value string) string {
 	value = strings.TrimSpace(value)

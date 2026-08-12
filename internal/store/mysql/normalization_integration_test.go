@@ -14,11 +14,7 @@ import (
 
 func normalizationStore(t *testing.T) *Store {
 	t.Helper()
-	store := integrationStore(t)
-	if err := store.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	return store
+	return integrationStore(t)
 }
 
 type normalizationFixture struct {
@@ -32,12 +28,12 @@ func newNormalizationFixture(t *testing.T, store *Store) *normalizationFixture {
 	fixture := &normalizationFixture{store: store}
 	t.Cleanup(func() {
 		for _, rcno := range fixture.rcnos {
-			if _, err := store.db.Exec("DELETE FROM declarations WHERE rcno = ?", rcno); err != nil {
+			if _, err := store.db.Exec("DELETE FROM mfds_declarations WHERE rcno = ?", rcno); err != nil {
 				t.Errorf("declaration cleanup failed: %v", err)
 			}
 		}
 		for _, jobID := range fixture.jobIDs {
-			if _, err := store.db.Exec("DELETE FROM jobs WHERE id = ?", jobID); err != nil {
+			if _, err := store.db.Exec("DELETE FROM mfds_jobs WHERE id = ?", jobID); err != nil {
 				t.Errorf("job cleanup failed: %v", err)
 			}
 		}
@@ -55,7 +51,7 @@ func (fixture *normalizationFixture) item(
 	t.Helper()
 	ctx := context.Background()
 	result, err := fixture.store.db.ExecContext(ctx, `
-		INSERT INTO jobs (job_type, requested_from_date, requested_to_date, status, config_json)
+		INSERT INTO mfds_jobs (job_type, requested_from_date, requested_to_date, status, config_json)
 		VALUES ('TEST', ?, ?, 'DONE', JSON_OBJECT())
 	`, processedDate, processedDate)
 	if err != nil {
@@ -67,7 +63,7 @@ func (fixture *normalizationFixture) item(
 	}
 	fixture.jobIDs = append(fixture.jobIDs, uint64(jobID))
 	result, err = fixture.store.db.ExecContext(ctx, `
-		INSERT INTO tasks (job_id, process_date, status) VALUES (?, ?, 'DONE')
+		INSERT INTO mfds_tasks (job_id, process_date, status) VALUES (?, ?, 'DONE')
 	`, jobID, processedDate)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +75,7 @@ func (fixture *normalizationFixture) item(
 	rawHash := sha256.Sum256([]byte("raw-" + semanticSeed))
 	semanticHash := sha256.Sum256([]byte(semanticSeed))
 	result, err = fixture.store.db.ExecContext(ctx, `
-		INSERT INTO fetches (
+		INSERT INTO mfds_fetches (
 			job_id, task_id, item_code, item_name, page_no, request_key_sha256,
 			request_method, request_url, request_query_json, attempt_no, started_at, status
 		) VALUES (?, ?, 'TEST', '테스트 품목', 1, ?, 'GET', 'https://example.test', JSON_OBJECT(), 1, ?, 'PARSED')
@@ -92,7 +88,7 @@ func (fixture *normalizationFixture) item(
 		t.Fatal(err)
 	}
 	result, err = fixture.store.db.ExecContext(ctx, `
-		INSERT INTO items (
+		INSERT INTO mfds_items (
 			job_id, task_id, fetch_id, row_no, rcno, queried_item_code, queried_item_name,
 			product_name_ko, product_name_en, item_name, importer_name, processed_date,
 			canonical_values_json, raw_row_html, raw_row_sha256, semantic_sha256, parser_version, observed_at
@@ -130,32 +126,32 @@ func TestNormalizationStore_최신관찰동기화와의미드리프트를반영�
 	}
 	var sourceID int64
 	var status string
-	if err := store.db.QueryRow(`SELECT source_item_id, normalization_status FROM declarations WHERE rcno = ?`, rcno).Scan(&sourceID, &status); err != nil {
+	if err := store.db.QueryRow(`SELECT source_item_id, normalization_status FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&sourceID, &status); err != nil {
 		t.Fatal(err)
 	}
 	if firstID == latestSameID || sourceID != latestSameID || status != string(normalization.StatusPending) {
 		t.Fatalf("source=%d status=%s, want latest=%d and PENDING", sourceID, status, latestSameID)
 	}
 	fixedUpdatedAt := time.Date(2026, 8, 4, 10, 0, 0, 123000, time.UTC)
-	if _, err := store.db.Exec(`UPDATE declarations SET updated_at = ? WHERE rcno = ?`, fixedUpdatedAt, rcno); err != nil {
+	if _, err := store.db.Exec(`UPDATE mfds_declarations SET updated_at = ? WHERE rcno = ?`, fixedUpdatedAt, rcno); err != nil {
 		t.Fatal(err)
 	}
 	var updatedAtBefore string
-	if err := store.db.QueryRow(`SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s.%f') FROM declarations WHERE rcno = ?`, rcno).Scan(&updatedAtBefore); err != nil {
+	if err := store.db.QueryRow(`SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s.%f') FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&updatedAtBefore); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SyncDeclarations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var updatedAtAfter string
-	if err := store.db.QueryRow(`SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s.%f') FROM declarations WHERE rcno = ?`, rcno).Scan(&updatedAtAfter); err != nil {
+	if err := store.db.QueryRow(`SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s.%f') FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&updatedAtAfter); err != nil {
 		t.Fatal(err)
 	}
 	if updatedAtAfter != updatedAtBefore {
 		t.Fatalf("idempotent sync changed updated_at: got %s want %s", updatedAtAfter, updatedAtBefore)
 	}
 	if _, err := store.db.Exec(`
-		UPDATE declarations
+		UPDATE mfds_declarations
 		SET normalization_status = 'NORMALIZED', claim_owner = 'old-worker',
 		    claim_lease_until = DATE_ADD(NOW(6), INTERVAL 1 HOUR), claim_attempts = 3,
 		    claim_next_attempt_at = DATE_ADD(NOW(6), INTERVAL 1 HOUR), claim_last_error = 'old failure',
@@ -168,7 +164,7 @@ func TestNormalizationStore_최신관찰동기화와의미드리프트를반영�
 	if err := store.SyncDeclarations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.db.QueryRow(`SELECT source_item_id, normalization_status FROM declarations WHERE rcno = ?`, rcno).Scan(&sourceID, &status); err != nil {
+	if err := store.db.QueryRow(`SELECT source_item_id, normalization_status FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&sourceID, &status); err != nil {
 		t.Fatal(err)
 	}
 	if sourceID != latestDriftID || status != string(normalization.StatusStale) {
@@ -181,7 +177,7 @@ func TestNormalizationStore_최신관찰동기화와의미드리프트를반영�
 	if err := store.db.QueryRow(`
 		SELECT claim_attempts, claim_owner, claim_lease_until, claim_next_attempt_at, claim_last_error,
 		       review_status, reviewed_by, reviewed_at, review_note
-		FROM declarations WHERE rcno = ?
+		FROM mfds_declarations WHERE rcno = ?
 	`, rcno).Scan(&attempts, &owner, &leaseUntil, &nextAttemptAt, &lastError, &reviewStatus, &reviewedBy, &reviewedAt, &reviewNote); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +205,7 @@ func TestNormalizationStore_ClaimFencing실패재시도와강제재정제를보�
 	if err != nil || len(second) != 0 {
 		t.Fatalf("concurrent claim=%+v error=%v, want no row", second, err)
 	}
-	if _, err := store.db.Exec(`UPDATE declarations SET claim_lease_until = DATE_SUB(NOW(6), INTERVAL 1 SECOND) WHERE rcno = ?`, rcno); err != nil {
+	if _, err := store.db.Exec(`UPDATE mfds_declarations SET claim_lease_until = DATE_SUB(NOW(6), INTERVAL 1 SECOND) WHERE rcno = ?`, rcno); err != nil {
 		t.Fatal(err)
 	}
 	retried, err := store.Claim(context.Background(), normalizationRequest(rcno, "worker-b"))
@@ -240,6 +236,76 @@ func TestNormalizationStore_ClaimFencing실패재시도와강제재정제를보�
 	forcedAgain, err := store.Claim(context.Background(), normalizationRequest(rcno, "worker-d"))
 	if err != nil || len(forcedAgain) != 1 || forcedAgain[0].ClaimAttempt != 4 {
 		t.Fatalf("force beyond max attempts=%+v error=%v", forcedAgain, err)
+	}
+}
+
+func TestNormalizationStore_Complete_후보를저장하고관리자선택을보존한다(t *testing.T) {
+	// Given
+	store := normalizationStore(t)
+	fixture := newNormalizationFixture(t, store)
+	rcno := fmt.Sprintf("NORM-MATCH-%d", time.Now().UnixNano())
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	fixture.item(t, rcno, "matching", now, now)
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "matching-worker"))
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("claim = %+v, error = %v", sources, err)
+	}
+	if _, err := store.db.Exec(`
+		UPDATE mfds_declarations SET selected_alcohol_id = 900, selected_distillery_id = 901, selected_region_id = 902 WHERE rcno = ?
+	`, rcno); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	err = store.Complete(context.Background(), normalization.Completion{
+		Source: sources[0],
+		Result: normalization.Result{
+			Status: normalization.StatusNormalized,
+			Fields: normalization.Fields{
+				AlcoholCandidates:    []normalization.ReferenceCandidate{{ID: 1, Score: 100}, {ID: 2, Score: 60}},
+				DistilleryCandidates: []normalization.ReferenceCandidate{{ID: 11, Score: 100}, {ID: 12, Score: 60}},
+				RegionCandidates:     []normalization.ReferenceCandidate{{ID: 21, Score: 80}},
+				MatchingVersion:      "matching-test",
+			},
+		},
+		NormalizationVersion: "normalization-test",
+		NormalizedAt:         now,
+	})
+
+	// Then
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selectedAlcohol, selectedDistillery, selectedRegion, firstAlcohol, secondAlcohol, firstDistillery, secondDistillery, firstRegion int64
+	var firstAlcoholScore, secondAlcoholScore, firstDistilleryScore, secondDistilleryScore, firstRegionScore float64
+	if err := store.db.QueryRow(`
+		SELECT selected_alcohol_id, selected_distillery_id, selected_region_id,
+		       alcohol_candidate_1_id, alcohol_candidate_1_score,
+		       alcohol_candidate_2_id, alcohol_candidate_2_score,
+		       distillery_candidate_1_id, distillery_candidate_1_score,
+		       distillery_candidate_2_id, distillery_candidate_2_score,
+		       region_candidate_1_id, region_candidate_1_score
+		FROM mfds_declarations WHERE rcno = ?
+	`, rcno).Scan(
+		&selectedAlcohol, &selectedDistillery, &selectedRegion,
+		&firstAlcohol, &firstAlcoholScore, &secondAlcohol, &secondAlcoholScore,
+		&firstDistillery, &firstDistilleryScore, &secondDistillery, &secondDistilleryScore,
+		&firstRegion, &firstRegionScore,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if selectedAlcohol != 900 || selectedDistillery != 901 || selectedRegion != 902 {
+		t.Fatalf("selected IDs changed: alcohol=%d distillery=%d region=%d", selectedAlcohol, selectedDistillery, selectedRegion)
+	}
+	if firstAlcohol != 1 || firstAlcoholScore != 100 || secondAlcohol != 2 || secondAlcoholScore != 60 ||
+		firstDistillery != 11 || firstDistilleryScore != 100 || secondDistillery != 12 || secondDistilleryScore != 60 ||
+		firstRegion != 21 || firstRegionScore != 80 {
+		t.Fatalf("candidate slots mismatch: alcohol=(%d,%.2f),(%d,%.2f) distillery=(%d,%.2f),(%d,%.2f) region=(%d,%.2f)",
+			firstAlcohol, firstAlcoholScore, secondAlcohol, secondAlcoholScore,
+			firstDistillery, firstDistilleryScore, secondDistillery, secondDistilleryScore, firstRegion, firstRegionScore)
 	}
 }
 
@@ -291,7 +357,7 @@ func TestNormalizationStore_재시도소진행_뒤의Pending을굶기지않는�
 	if err := store.SyncDeclarations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`UPDATE declarations SET claim_attempts = 3 WHERE rcno = ?`, exhaustedRCNO); err != nil {
+	if _, err := store.db.Exec(`UPDATE mfds_declarations SET claim_attempts = 3 WHERE rcno = ?`, exhaustedRCNO); err != nil {
 		t.Fatal(err)
 	}
 	request := normalizationRequest("", "worker-next")
@@ -309,7 +375,7 @@ func TestNormalizationStore_Preview와Remaining은미동기화원장을읽기전
 	itemID := fixture.item(t, rcno, "preview", now, now)
 	var rawHTML string
 	var semanticHash []byte
-	if err := store.db.QueryRow(`SELECT raw_row_html, semantic_sha256 FROM items WHERE id = ?`, itemID).Scan(&rawHTML, &semanticHash); err != nil {
+	if err := store.db.QueryRow(`SELECT raw_row_html, semantic_sha256 FROM mfds_items WHERE id = ?`, itemID).Scan(&rawHTML, &semanticHash); err != nil {
 		t.Fatal(err)
 	}
 	preview, err := store.Preview(context.Background(), normalizationRequest(rcno, "dry-run"))
@@ -321,7 +387,7 @@ func TestNormalizationStore_Preview와Remaining은미동기화원장을읽기전
 		t.Fatalf("remaining=%+v error=%v, want pending including unmaterialized RCNO", remaining, err)
 	}
 	var declarationCount int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM declarations WHERE rcno = ?`, rcno).Scan(&declarationCount); err != nil {
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&declarationCount); err != nil {
 		t.Fatal(err)
 	}
 	if declarationCount != 0 {
@@ -329,7 +395,7 @@ func TestNormalizationStore_Preview와Remaining은미동기화원장을읽기전
 	}
 	var rawHTMLAfter string
 	var semanticHashAfter []byte
-	if err := store.db.QueryRow(`SELECT raw_row_html, semantic_sha256 FROM items WHERE id = ?`, itemID).Scan(&rawHTMLAfter, &semanticHashAfter); err != nil {
+	if err := store.db.QueryRow(`SELECT raw_row_html, semantic_sha256 FROM mfds_items WHERE id = ?`, itemID).Scan(&rawHTMLAfter, &semanticHashAfter); err != nil {
 		t.Fatal(err)
 	}
 	if rawHTMLAfter != rawHTML || string(semanticHashAfter) != string(semanticHash) {

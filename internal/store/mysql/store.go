@@ -5,16 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sync"
 
 	driver "github.com/go-sql-driver/mysql"
-	"github.com/pressly/goose/v3"
 
-	"github.com/bottle-note/mfds-crawler/git.secrets/project/mfds/migrations"
 	"github.com/bottle-note/mfds-crawler/internal/config"
 )
-
-var migrationMu sync.Mutex
 
 type Store struct {
 	db *sql.DB
@@ -35,20 +30,6 @@ func Open(cfg config.DatabaseConfig) (*Store, error) {
 func (s *Store) Ping(ctx context.Context) error {
 	if err := s.db.PingContext(ctx); err != nil {
 		return fmt.Errorf("MySQL 연결 실패: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) Migrate(ctx context.Context) error {
-	migrationMu.Lock()
-	defer migrationMu.Unlock()
-
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("mysql"); err != nil {
-		return fmt.Errorf("migration dialect 설정 실패: %w", err)
-	}
-	if err := goose.UpContext(ctx, s.db, "."); err != nil {
-		return fmt.Errorf("migration 적용 실패: %w", err)
 	}
 	return nil
 }

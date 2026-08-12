@@ -20,7 +20,7 @@ func (s *Store) LatestCompletedThrough(ctx context.Context) (*time.Time, error) 
 	var through sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
 		SELECT sync_through_date
-		FROM company_registry_runs
+		FROM mfds_company_registry_runs
 		WHERE status = 'COMPLETED' AND sync_through_date IS NOT NULL
 		ORDER BY id DESC
 		LIMIT 1
@@ -44,7 +44,7 @@ func (s *Store) StartCollection(ctx context.Context, startedAt time.Time, window
 	}
 	servicesJSON, _ := json.Marshal(companyregistry.Services)
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO company_registry_runs (
+		INSERT INTO mfds_company_registry_runs (
 			run_uuid, status, config_json, requested_services_json,
 			change_since_date, sync_through_date, started_at
 		) VALUES (?, 'RUNNING', ?, ?, ?, ?, ?)
@@ -73,7 +73,7 @@ func (s *Store) SavePage(ctx context.Context, runID uint64, page companyregistry
 			}
 		}
 		_, err = tx.ExecContext(ctx, `
-			UPDATE company_registry_runs
+			UPDATE mfds_company_registry_runs
 			SET fetched_requests = fetched_requests + 1,
 			    parsed_rows = parsed_rows + ?
 			WHERE id = ?
@@ -129,7 +129,7 @@ func insertCompanyRegistryFetch(
 		totalCount = page.TotalCount
 	}
 	result, err := tx.ExecContext(ctx, `
-		INSERT INTO company_registry_fetches (
+		INSERT INTO mfds_company_registry_fetches (
 			run_id, service_id, page_no, start_idx, end_idx,
 			request_key_sha256, request_method, request_path_redacted, request_filter_json,
 			attempt_no, started_at, finished_at, duration_ms, http_status,
@@ -175,7 +175,7 @@ func insertCompanyRegistryRawRow(
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO c001_importer_licenses_raw (
+			INSERT INTO mfds_c001_importer_licenses_raw (
 				fetch_id, row_no, president_name, permit_date_raw, license_no, institution_name,
 				business_name, location_address, telephone_no, industry_name,
 				raw_payload_json, raw_payload_sha256, observed_at
@@ -190,7 +190,7 @@ func insertCompanyRegistryRawRow(
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO i2821_importer_closures_raw (
+			INSERT INTO mfds_i2821_importer_closures_raw (
 				fetch_id, row_no, closure_date_raw, president_name, permit_date_raw, license_no,
 				institution_name, business_name, closure_status_name, location_address, industry_name,
 				raw_payload_json, raw_payload_sha256, observed_at
@@ -205,7 +205,7 @@ func insertCompanyRegistryRawRow(
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO i0250_excellent_importers_raw (
+			INSERT INTO mfds_i0250_excellent_importers_raw (
 				fetch_id, row_no, export_country_name, import_product_manufacturer_name, permit_date_raw,
 				product_count_raw, license_no, product_name, excellent_importer_registration_no,
 				business_name, address, raw_payload_json, raw_payload_sha256, observed_at
@@ -220,7 +220,7 @@ func insertCompanyRegistryRawRow(
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO i0470_administrative_dispositions_raw (
+			INSERT INTO mfds_i0470_administrative_dispositions_raw (
 				fetch_id, row_no, president_name, last_updated_raw, license_no,
 				disposition_institution_name, violated_law_name, disposition_detail_sequence,
 				violation_content, address, public_until_raw, industry_name, decision_date_raw,
@@ -242,7 +242,7 @@ func insertCompanyRegistryRawRow(
 
 func (s *Store) CompleteCollection(ctx context.Context, runID uint64, summary companyregistry.Summary, finishedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE company_registry_runs
+		UPDATE mfds_company_registry_runs
 		SET status = 'COMPLETED', completed_services = total_services,
 		    finished_at = ?
 		WHERE id = ? AND status = 'RUNNING'
@@ -255,7 +255,7 @@ func (s *Store) CompleteCollection(ctx context.Context, runID uint64, summary co
 
 func (s *Store) FailCollection(ctx context.Context, runID uint64, cause error, finishedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE company_registry_runs
+		UPDATE mfds_company_registry_runs
 		SET status = 'FAILED', last_error = ?, finished_at = ?
 		WHERE id = ? AND status = 'RUNNING'
 	`, cause.Error(), finishedAt, runID)

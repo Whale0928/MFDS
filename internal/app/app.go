@@ -118,6 +118,7 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			return service.Collect(ctx)
 		},
 		RunNormalization: runNormalization,
+		RunMatching:      runMatching,
 		Out:              out,
 		ErrOut:           errOut,
 	})

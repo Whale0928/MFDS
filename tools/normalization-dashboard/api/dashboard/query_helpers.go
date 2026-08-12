@@ -63,7 +63,7 @@ func scanDeclarationList(rows RowIterator) ([]declarationListItem, error) {
 	for rows.Next() {
 		var value declarationListItem
 		var reasons string
-		if err := rows.Scan(&value.RCNO, &value.SourceName, &value.NormalizedName, &value.Key1, &value.Key2, &value.Key3, &value.Status, &value.ProcessedAt, &value.ItemName, &value.ImporterName, &value.Country, &reasons); err != nil {
+		if err := rows.Scan(&value.RCNO, &value.SourceName, &value.NormalizedName, &value.Key1, &value.Key2, &value.Key3, &value.Status, &value.ProcessedAt, &value.ItemName, &value.ImporterName, &value.Country, &value.AlcoholMatched, &value.DistilleryMatched, &value.RegionMatched, &reasons); err != nil {
 			return nil, err
 		}
 		value.ReasonCodes = jsonList(reasons)

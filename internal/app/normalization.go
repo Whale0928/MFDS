@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
+	matchdomain "github.com/bottle-note/mfds-crawler/internal/matching"
 	parser "github.com/bottle-note/mfds-crawler/internal/normalization"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
 	usecase "github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
@@ -25,8 +26,25 @@ func runNormalization(
 	defer func() {
 		runErr = errors.Join(runErr, store.Close())
 	}()
+	matcher, err := store.LoadMatchingSnapshot(ctx)
+	if err != nil {
+		return usecase.Summary{SystemFailures: 1}, err
+	}
 
-	service, err := usecase.NewService(store, parserAdapter{}, usecase.Options{
+	var matchingRunID int64
+	if !command.DryRun {
+		matchingRunID, err = store.StartMatchingRun(ctx, matcher.Version(), parser.Version, "NORMALIZATION")
+		if err != nil {
+			return usecase.Summary{SystemFailures: 1}, err
+		}
+		defer func() {
+			finishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			runErr = errors.Join(runErr, store.FinishMatchingRun(finishCtx, matchingRunID, summary, runErr))
+		}()
+	}
+
+	service, err := usecase.NewService(store, parserAdapter{matcher: matcher, matchingRunID: matchingRunID}, usecase.Options{
 		RunLimit:             cfg.Normalization.RunLimit,
 		LeaseDuration:        cfg.Normalization.LeaseDuration,
 		MaxAttempts:          cfg.Normalization.MaxAttempts,
@@ -41,9 +59,12 @@ func runNormalization(
 	return service.Execute(ctx, command)
 }
 
-type parserAdapter struct{}
+type parserAdapter struct {
+	matcher       *matchdomain.ReferenceSnapshot
+	matchingRunID int64
+}
 
-func (parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
+func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
 	result := parser.Normalize(parser.Input{
 		ProductNameKO:             source.ProductNameKO,
 		ProductNameEN:             source.ProductNameEN,
@@ -58,6 +79,13 @@ func (parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
 	for index, reason := range result.Reasons {
 		reasons[index] = string(reason)
 	}
+	match := p.matcher.Match(matchdomain.Input{
+		BaseNameKO: result.BaseProductNameKO, BaseNameEN: result.BaseProductNameEN,
+		SearchNameKO: result.NameSearchKeyKO, SearchNameEN: result.NameSearchKeyEN,
+		ABVPercent: result.ABVPercent, Age: result.AgeRaw, AgeYears: result.AgeYears,
+		Cask: result.CaskCandidate, Edition: result.EditionName, Category: result.AlcoholCategoryEN,
+		UnitVolumeML: result.UnitVolumeML, ManufactureCountry: result.ManufactureCountry.NameEN,
+	})
 	return usecase.Result{
 		Status: usecase.Status(result.Status),
 		Fields: usecase.Fields{
@@ -74,6 +102,8 @@ func (parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
 			PackageCount:                   result.PackageCount,
 			ABVRaw:                         result.ABVRaw,
 			ABVPercent:                     result.ABVPercent,
+			IngredientPercentRaw:           result.IngredientPercentRaw,
+			IngredientPercent:              result.IngredientPercent,
 			ProofRaw:                       result.ProofRaw,
 			ProofValue:                     result.ProofValue,
 			StrengthType:                   result.StrengthType,
@@ -83,6 +113,9 @@ func (parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
 			VintageYear:                    result.VintageYear,
 			VersionMarker:                  result.VersionMarker,
 			EditionName:                    result.EditionName,
+			VariantMarkerRaw:               result.VariantMarkerRaw,
+			VariantMarkerType:              result.VariantMarkerType,
+			VariantMarkerValue:             result.VariantMarkerValue,
 			MaterialCode:                   result.MaterialCode,
 			CaskNumber:                     result.CaskNumber,
 			BatchNumber:                    result.BatchNumber,
@@ -94,6 +127,7 @@ func (parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
 			ImporterBaseName:               result.ImporterBaseName,
 			ImporterSearchKey:              result.ImporterSearchKey,
 			LegalEntityType:                result.LegalEntityType,
+			ManufacturerName:               result.ManufacturerName,
 			OverseasEstablishmentSearchKey: result.OverseasEstablishmentSearchKey,
 			AlcoholNameKO:                  result.AlcoholNameKO,
 			AlcoholNameEN:                  result.AlcoholNameEN,
@@ -113,10 +147,26 @@ func (parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
 			ExportCountryNameEN:            result.ExportCountry.NameEN,
 			ExportCountryAlpha2:            result.ExportCountry.Alpha2,
 			ExportCountryAlpha3:            result.ExportCountry.Alpha3,
+			AlcoholCandidates:              referenceCandidates(match.Alcohols),
+			DistilleryCandidates:           referenceCandidates(match.Distilleries),
+			RegionCandidates:               referenceCandidates(match.Regions),
+			MatchingVersion:                match.Version.String(),
+			MatchingRunID:                  p.matchingRunID,
+			MatchingResult:                 match,
 		},
 		Reasons:           reasons,
 		UnparsedFragments: result.UnparsedFragments,
 	}, nil
+}
+
+func referenceCandidates(candidates []matchdomain.Candidate) []usecase.ReferenceCandidate {
+	result := make([]usecase.ReferenceCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		result = append(result, usecase.ReferenceCandidate{
+			ID: candidate.ID, Score: candidate.Score,
+		})
+	}
+	return result
 }
 
 func normalizationOwner() string {

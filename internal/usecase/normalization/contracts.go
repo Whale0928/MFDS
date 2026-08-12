@@ -4,6 +4,8 @@ package normalization
 import (
 	"context"
 	"time"
+
+	matchdomain "github.com/bottle-note/mfds-crawler/internal/matching"
 )
 
 // Status is the current normalization decision for one declaration.
@@ -56,6 +58,8 @@ type Fields struct {
 	PackageCount                   *int
 	ABVRaw                         string
 	ABVPercent                     *float64
+	IngredientPercentRaw           string
+	IngredientPercent              *float64
 	ProofRaw                       string
 	ProofValue                     *float64
 	StrengthType                   string
@@ -65,6 +69,9 @@ type Fields struct {
 	VintageYear                    *int
 	VersionMarker                  string
 	EditionName                    string
+	VariantMarkerRaw               string
+	VariantMarkerType              string
+	VariantMarkerValue             string
 	MaterialCode                   string
 	CaskNumber                     string
 	BatchNumber                    string
@@ -76,6 +83,7 @@ type Fields struct {
 	ImporterBaseName               string
 	ImporterSearchKey              string
 	LegalEntityType                string
+	ManufacturerName               string
 	OverseasEstablishmentSearchKey string
 	AlcoholNameKO                  string
 	AlcoholNameEN                  string
@@ -95,6 +103,18 @@ type Fields struct {
 	ExportCountryNameEN            string
 	ExportCountryAlpha2            string
 	ExportCountryAlpha3            string
+	AlcoholCandidates              []ReferenceCandidate
+	DistilleryCandidates           []ReferenceCandidate
+	RegionCandidates               []ReferenceCandidate
+	MatchingVersion                string
+	MatchingRunID                  int64
+	MatchingResult                 matchdomain.MatchResult
+}
+
+// ReferenceCandidate is one ranked BottleNote reference. Selection remains an administrator decision.
+type ReferenceCandidate struct {
+	ID    int64
+	Score float64
 }
 
 // Result is the parser's deterministic, non-destructive decision.

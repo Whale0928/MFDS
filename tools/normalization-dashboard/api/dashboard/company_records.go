@@ -16,27 +16,27 @@ const officialSourceRowsSQL = `WITH official_source_rows AS (
            COALESCE(r.industry_name, '') AS industry_name,
            COALESCE(r.location_address, '') AS address,
            r.observed_at
-    FROM c001_importer_licenses_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_c001_importer_licenses_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
     UNION ALL
     SELECT 'CLOSURE', r.id, COALESCE(r.business_name, ''), COALESCE(r.license_no, ''),
            COALESCE(r.industry_name, ''), COALESCE(r.location_address, ''), r.observed_at
-    FROM i2821_importer_closures_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_i2821_importer_closures_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
     UNION ALL
     SELECT 'EXCELLENT_IMPORTER', r.id, COALESCE(r.business_name, ''), COALESCE(r.license_no, ''),
            '', COALESCE(r.address, ''), r.observed_at
-    FROM i0250_excellent_importers_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_i0250_excellent_importers_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
     UNION ALL
     SELECT 'DISPOSITION', r.id, COALESCE(r.business_name, ''), COALESCE(r.license_no, ''),
            COALESCE(r.industry_name, ''), COALESCE(r.address, ''), r.observed_at
-    FROM i0470_administrative_dispositions_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_i0470_administrative_dispositions_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
 ), ranked_source_rows AS (
     SELECT source_type, source_row_id, business_name, license_number,
            CAST(business_name AS BINARY) AS business_name_key,
@@ -67,27 +67,27 @@ const officialDetailSQL = `WITH official_detail_rows AS (
     SELECT 'BUSINESS_LICENSE' AS source_type, r.id AS source_row_id,
            COALESCE(r.business_name, '') AS business_name, COALESCE(r.license_no, '') AS license_number,
            r.observed_at, CAST(r.raw_payload_json AS CHAR) AS payload_json, HEX(r.raw_payload_sha256) AS payload_hash
-    FROM c001_importer_licenses_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_c001_importer_licenses_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
     UNION ALL
     SELECT 'CLOSURE', r.id, COALESCE(r.business_name, ''), COALESCE(r.license_no, ''),
            r.observed_at, CAST(r.raw_payload_json AS CHAR), HEX(r.raw_payload_sha256)
-    FROM i2821_importer_closures_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_i2821_importer_closures_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
     UNION ALL
     SELECT 'EXCELLENT_IMPORTER', r.id, COALESCE(r.business_name, ''), COALESCE(r.license_no, ''),
            r.observed_at, CAST(r.raw_payload_json AS CHAR), HEX(r.raw_payload_sha256)
-    FROM i0250_excellent_importers_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_i0250_excellent_importers_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
     UNION ALL
     SELECT 'DISPOSITION', r.id, COALESCE(r.business_name, ''), COALESCE(r.license_no, ''),
            r.observed_at, CAST(r.raw_payload_json AS CHAR), HEX(r.raw_payload_sha256)
-    FROM i0470_administrative_dispositions_raw AS r
-    JOIN company_registry_fetches AS f ON f.id = r.fetch_id
-    JOIN company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
+    FROM mfds_i0470_administrative_dispositions_raw AS r
+    JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
+    JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
 ), ranked_detail_rows AS (
     SELECT source_type, source_row_id, business_name, license_number, observed_at, payload_json, payload_hash,
            ROW_NUMBER() OVER (

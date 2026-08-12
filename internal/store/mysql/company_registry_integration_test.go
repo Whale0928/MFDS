@@ -70,19 +70,19 @@ func TestCompanyRegistryStore_네서비스Raw를한실행에저장한다(t *test
 		t.Fatalf("Collect() error = %v", err)
 	}
 	t.Cleanup(func() {
-		if _, cleanupErr := store.db.Exec("DELETE FROM company_registry_runs WHERE id = ?", summary.CollectionID); cleanupErr != nil {
+		if _, cleanupErr := store.db.Exec("DELETE FROM mfds_company_registry_runs WHERE id = ?", summary.CollectionID); cleanupErr != nil {
 			t.Errorf("company registry cleanup failed: %v", cleanupErr)
 		}
 	})
 
 	counts := make([]int, 0, 6)
 	for _, query := range []string{
-		"SELECT COUNT(*) FROM company_registry_fetches WHERE run_id = ?",
-		"SELECT COUNT(*) FROM c001_importer_licenses_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
-		"SELECT COUNT(*) FROM i2821_importer_closures_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
-		"SELECT COUNT(*) FROM i0250_excellent_importers_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
-		"SELECT COUNT(*) FROM i0470_administrative_dispositions_raw r JOIN company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
-		"SELECT COUNT(*) FROM company_registry_runs WHERE id = ? AND status = 'COMPLETED'",
+		"SELECT COUNT(*) FROM mfds_company_registry_fetches WHERE run_id = ?",
+		"SELECT COUNT(*) FROM mfds_c001_importer_licenses_raw r JOIN mfds_company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
+		"SELECT COUNT(*) FROM mfds_i2821_importer_closures_raw r JOIN mfds_company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
+		"SELECT COUNT(*) FROM mfds_i0250_excellent_importers_raw r JOIN mfds_company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
+		"SELECT COUNT(*) FROM mfds_i0470_administrative_dispositions_raw r JOIN mfds_company_registry_fetches f ON f.id=r.fetch_id WHERE f.run_id = ?",
+		"SELECT COUNT(*) FROM mfds_company_registry_runs WHERE id = ? AND status = 'COMPLETED'",
 	} {
 		var count int
 		if err := store.db.QueryRow(query, summary.CollectionID).Scan(&count); err != nil {
@@ -97,9 +97,9 @@ func TestCompanyRegistryStore_네서비스Raw를한실행에저장한다(t *test
 	if err := store.db.QueryRow(`
 		SELECT COUNT(*) FROM information_schema.TABLES
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (
-			'company_registry_runs', 'company_registry_fetches', 'c001_importer_licenses_raw',
-			'i2821_importer_closures_raw', 'i0250_excellent_importers_raw',
-			'i0470_administrative_dispositions_raw'
+			'mfds_company_registry_runs', 'mfds_company_registry_fetches', 'mfds_c001_importer_licenses_raw',
+			'mfds_i2821_importer_closures_raw', 'mfds_i0250_excellent_importers_raw',
+			'mfds_i0470_administrative_dispositions_raw'
 		)
 	`).Scan(&tableCount); err != nil {
 		t.Fatal(err)
@@ -107,9 +107,9 @@ func TestCompanyRegistryStore_네서비스Raw를한실행에저장한다(t *test
 	if err := store.db.QueryRow(`
 		SELECT COUNT(*) FROM information_schema.COLUMNS
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (
-			'company_registry_runs', 'company_registry_fetches', 'c001_importer_licenses_raw',
-			'i2821_importer_closures_raw', 'i0250_excellent_importers_raw',
-			'i0470_administrative_dispositions_raw'
+			'mfds_company_registry_runs', 'mfds_company_registry_fetches', 'mfds_c001_importer_licenses_raw',
+			'mfds_i2821_importer_closures_raw', 'mfds_i0250_excellent_importers_raw',
+			'mfds_i0470_administrative_dispositions_raw'
 		) AND (COLUMN_COMMENT IS NULL OR COLUMN_COMMENT = '')
 	`).Scan(&missingComments); err != nil {
 		t.Fatal(err)
@@ -117,9 +117,9 @@ func TestCompanyRegistryStore_네서비스Raw를한실행에저장한다(t *test
 	if err := store.db.QueryRow(`
 		SELECT COUNT(*) FROM information_schema.COLUMNS
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (
-			'company_registry_runs', 'company_registry_fetches', 'c001_importer_licenses_raw',
-			'i2821_importer_closures_raw', 'i0250_excellent_importers_raw',
-			'i0470_administrative_dispositions_raw'
+			'mfds_company_registry_runs', 'mfds_company_registry_fetches', 'mfds_c001_importer_licenses_raw',
+			'mfds_i2821_importer_closures_raw', 'mfds_i0250_excellent_importers_raw',
+			'mfds_i0470_administrative_dispositions_raw'
 		) AND DATA_TYPE = 'enum'
 	`).Scan(&enumColumns); err != nil {
 		t.Fatal(err)

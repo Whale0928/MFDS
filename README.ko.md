@@ -10,15 +10,15 @@
 ## 데이터 구조
 
 ```text
-jobs → tasks → fetches → items → declarations
+mfds_jobs → mfds_tasks → mfds_fetches → mfds_items → mfds_declarations
 ```
 
-- `jobs`: 요청한 수집 기간과 집계 상태
-- `tasks`: 날짜별 재시도 단위
-- `fetches`: HTTP 요청 정보와 압축 원문 응답
-- `items`: RCNO로 대조하는 append-only 관찰 원장
-- `declarations`: RCNO당 1행인 최신 원본 참조와 정제 결과
-- `declaration_details`: 원본 관찰과 정제 결과를 함께 읽는 View
+- `mfds_jobs`: 요청한 수집 기간과 집계 상태
+- `mfds_tasks`: 날짜별 재시도 단위
+- `mfds_fetches`: HTTP 요청 정보와 압축 원문 응답
+- `mfds_items`: RCNO로 대조하는 append-only 관찰 원장
+- `mfds_declarations`: RCNO당 1행인 최신 원본 참조와 정제 결과
+- `mfds_declaration_details`: 원본 관찰과 정제 결과를 함께 읽는 View
 
 다중 페이지 결과는 다시 수집한 RCNO 집합이 일치할 때 확정합니다. 반복 관찰은
 이후 정규화를 위해 원장에 유지합니다.
@@ -44,20 +44,32 @@ task run -- collect \
   --to YYYY-MM-DD \
   --workers 2
 
+task run -- collect-recent
+
 task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
 
 task run -- sync-company-registry --since YYYY-MM-DD
+task run -- match --all --dry-run
+task run -- match --all
 ```
 
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
 재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
 정제 상태는 `PENDING`, `STALE`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`,
-`UNPARSED`로 구분합니다. 원문 `items`는 수정하거나 삭제하지 않습니다.
+`UNPARSED`로 구분합니다. 원문 `mfds_items`는 수정하거나 삭제하지 않습니다.
+`collect-recent`는 인자 없이 KST 오늘을 포함한 최근 7일을 append-only로
+수집합니다. 반복 실행 시 겹치는 관측치를 의도적으로 보존하며 정제는 실행하지
+않습니다.
 시스템 오류로 최대 재시도 횟수를 소진한 RCNO는 원인을 해결한 뒤
 `normalize --rcno RCNO`로 강제 재정제합니다.
+
+MFDS는 같은 BottleNote 데이터베이스의 `alcohols`, `distilleries`, `regions`
+원본 테이블을 직접 조회합니다. 1차 정제는 증류소·리전 후보를 함께 저장하고,
+`match`는 이미 정제된 행을 백필합니다. 두 경로 모두 관리자가 선택한 ID는
+변경하지 않습니다.
 
 ## 설정
 
@@ -74,7 +86,9 @@ MYSQL_ROOT_PASSWORD  MYSQL_DATABASE  MYSQL_USER  MYSQL_PASSWORD  MYSQL_DSN
 ```
 
 OS 환경 변수가 `task setup`이 생성하는 추적 제외 `.env.local`보다 우선합니다.
-Migration과 생성된 sqlc 코드는 `git.secrets`에서 관리합니다.
+Flyway migration은 `git.environment-variables/storage/db/migration`에서
+관리합니다. MFDS 전용 sqlc 입력 스키마·쿼리와 생성 코드는 `git.secrets`에서
+관리합니다.
 
 식품안전나라 업체 원장은 별도 키를 사용합니다.
 
@@ -87,7 +101,7 @@ FOODSAFETYKOREA_API_KEY
 최초 실행에는 `--since`가 필요하고, 이후에는 마지막 완료 실행의 기준일을 다시
 포함해 변경일자(`CHNG_DT`) 기준으로 증분 동기화합니다. 변경일자 필터가 없는
 우수수입업소 현황(I0250)은 매번 전체를 조회합니다. 요청·행 원문은 별도 원본(raw)
-원장에 추가하며 기존 `items`와 `declarations`는 수정하지 않습니다.
+원장에 추가하며 기존 `mfds_items`와 `mfds_declarations`는 수정하지 않습니다.
 
 업체 연결 테이블은 만들지 않습니다. 대시보드가 수입 기록 상세를 열 때 원장의
 수입사명과 공식 업소명을 그대로 비교해 현재 데이터베이스를 조회하며, 같은 이름의
@@ -105,7 +119,9 @@ internal/source/foodsafetykorea/ 식품안전나라 JSON client
 internal/usecase/weblist/    수집과 RCNO 대조
 internal/usecase/companyregistry/ 업체 공식정보 증분 수집
 internal/normalization/      순수 정제 규칙과 파서
+internal/matching/           불변 alcohol·증류소·리전 matcher
 internal/usecase/normalization/ 정제 batch와 상태 전이
+internal/usecase/matching/   매칭 dry-run과 백필 조정
 internal/store/mysql/        원장과 정제 결과 저장
 data/config.yaml             비밀이 아닌 고정 실행값
 ```

@@ -25,10 +25,15 @@ var (
 	}
 )
 
+type distilleryMatch struct {
+	NameKO string
+	NameEN string
+}
+
 func deriveAlcoholCandidate(input Input, state *derivationState) {
 	result := state.result
-	result.AlcoholNameKO = alcoholName(input.ProductNameKO)
-	result.AlcoholNameEN = alcoholName(input.ProductNameEN)
+	result.AlcoholNameKO = alcoholName(input.ProductNameKO, result.ABVPercent)
+	result.AlcoholNameEN = alcoholName(input.ProductNameEN, result.ABVPercent)
 	result.AlcoholCategoryKO, result.AlcoholCategoryEN = alcoholCategory(input.ItemName)
 	if input.ItemName != "" && result.AlcoholCategoryKO == "" {
 		state.review(ReasonAlcoholCategoryNotMapped, input.ItemName)
@@ -56,15 +61,16 @@ func deriveAlcoholCandidate(input Input, state *derivationState) {
 	if result.CaskCandidate != "" {
 		state.add(ReasonCaskTypeCandidateExtracted)
 	}
-	establishment := strings.TrimSpace(input.OverseasEstablishmentName)
-	if establishment != "" {
-		if containsHangul(establishment) {
-			result.DistilleryNameKOCandidate = establishment
-		} else {
-			result.DistilleryNameENCandidate = establishment
-		}
+	if distillery := matchDistillery(input.ProductNameKO, input.ProductNameEN); distillery != nil {
+		result.DistilleryNameKOCandidate = distillery.NameKO
+		result.DistilleryNameENCandidate = distillery.NameEN
 		state.add(ReasonOverseasEstablishmentDistilleryCandidate)
 	}
+}
+
+func matchDistillery(_, _ string) *distilleryMatch {
+	// TODO: distilleries 기준 데이터의 조회·점수화가 연결되면 제품명에서 후보를 계산합니다.
+	return nil
 }
 
 func alcoholCategory(itemName string) (string, string) {
@@ -83,7 +89,7 @@ func alcoholCategory(itemName string) (string, string) {
 }
 
 // alcoholName keeps the BottleNote-facing name, so it shares baseName's segment engine but preserves age, cask and batch evidence.
-func alcoholName(value string) string { return buildName(value, alcoholNameMode) }
+func alcoholName(value string, abv *float64) string { return buildName(value, alcoholNameMode, abv) }
 
 func findCaskCandidate(values ...string) string {
 	combined := strings.Join(values, " ")
@@ -93,13 +99,4 @@ func findCaskCandidate(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func containsHangul(value string) bool {
-	for _, char := range value {
-		if char >= '가' && char <= '힣' {
-			return true
-		}
-	}
-	return false
 }
