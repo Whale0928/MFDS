@@ -55,6 +55,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/declarations", s.declarations)
 	mux.HandleFunc("GET /api/declarations/{rcno}", s.declaration)
 	mux.HandleFunc("GET /api/importers", s.importers)
+	mux.HandleFunc("GET /api/importers/detail", s.importerDetail)
+	mux.HandleFunc("GET /api/importers/products", s.importerProducts)
+	mux.HandleFunc("GET /api/importers/product-declarations", s.importerProductDeclarations)
 	mux.HandleFunc("GET /api/quality", s.quality)
 	return cors(mux)
 }

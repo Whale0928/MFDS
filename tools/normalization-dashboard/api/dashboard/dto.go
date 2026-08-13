@@ -63,12 +63,71 @@ type importerListItem struct {
 	Source            string `json:"source"`
 }
 
+type importerGroupListItem struct {
+	BusinessName     string `json:"business_name"`
+	LicenseCount     int64  `json:"license_count"`
+	AddressCount     int64  `json:"address_count"`
+	InstitutionCount int64  `json:"institution_count"`
+	FirstPermitDate  string `json:"first_permit_date"`
+	ObservedAt       string `json:"observed_at"`
+	Source           string `json:"source"`
+}
+
 type importerListResponse struct {
-	Importers  []importerListItem `json:"importers"`
-	Page       int                `json:"page"`
-	PageSize   int                `json:"page_size"`
-	Total      int64              `json:"total"`
-	TotalPages int                `json:"total_pages"`
+	Importers  []importerGroupListItem `json:"importers"`
+	Page       int                     `json:"page"`
+	PageSize   int                     `json:"page_size"`
+	Total      int64                   `json:"total"`
+	TotalPages int                     `json:"total_pages"`
+}
+
+type importerStatistics struct {
+	DeclarationCount int64  `json:"declaration_count"`
+	ProductCount     int64  `json:"product_count"`
+	FirstImportDate  string `json:"first_import_date"`
+	LastImportDate   string `json:"last_import_date"`
+}
+
+type importerDetailResponse struct {
+	BusinessName string             `json:"business_name"`
+	Licenses     []importerListItem `json:"licenses"`
+	Statistics   importerStatistics `json:"statistics"`
+}
+
+type importerProductGroup struct {
+	ProductKey       string `json:"product_key"`
+	ProductName      string `json:"product_name"`
+	DeclarationCount int64  `json:"declaration_count"`
+	FirstImportDate  string `json:"first_import_date"`
+	LastImportDate   string `json:"last_import_date"`
+}
+
+type importerProductPage struct {
+	Products   []importerProductGroup `json:"products"`
+	Page       int                    `json:"page"`
+	PageSize   int                    `json:"page_size"`
+	Total      int64                  `json:"total"`
+	TotalPages int                    `json:"total_pages"`
+}
+
+type importerLedgerItem struct {
+	RCNO              string `json:"rcno"`
+	SourceName        string `json:"source_name"`
+	SourceNameEnglish string `json:"source_name_english"`
+	ProcessedAt       string `json:"processed_at"`
+	ItemName          string `json:"item_name"`
+	ManufacturerName  string `json:"manufacturer_name"`
+	Country           string `json:"country"`
+	Volume            string `json:"volume"`
+	ABV               string `json:"abv"`
+}
+
+type importerLedgerPage struct {
+	Declarations []importerLedgerItem `json:"declarations"`
+	Page         int                  `json:"page"`
+	PageSize     int                  `json:"page_size"`
+	Total        int64                `json:"total"`
+	TotalPages   int                  `json:"total_pages"`
 }
 type declarationDetail struct {
 	RCNO                  string                    `json:"rcno"`

@@ -107,11 +107,70 @@ export interface Importer {
   source: string
 }
 
+export interface ImporterGroup {
+  business_name: string
+  license_count: number
+  address_count: number
+  institution_count: number
+  first_permit_date: string
+  observed_at: string
+  source: string
+}
+
 export interface ImporterPage {
-  importers: Importer[]
+  importers: ImporterGroup[]
   total: number
   page: number
   page_size: number
+  total_pages: number
+}
+
+export interface ImporterStatistics {
+  declaration_count: number
+  product_count: number
+  first_import_date: string
+  last_import_date: string
+}
+
+export interface ImporterDetail {
+  business_name: string
+  licenses: Importer[]
+  statistics: ImporterStatistics
+}
+
+export interface ImporterProductGroup {
+  product_key: string
+  product_name: string
+  declaration_count: number
+  first_import_date: string
+  last_import_date: string
+}
+
+export interface ImporterProductPage {
+  products: ImporterProductGroup[]
+  page: number
+  page_size: number
+  total: number
+  total_pages: number
+}
+
+export interface ImporterLedgerItem {
+  rcno: string
+  source_name: string
+  source_name_english: string
+  processed_at: string
+  item_name: string
+  manufacturer_name: string
+  country: string
+  volume: string
+  abv: string
+}
+
+export interface ImporterLedgerPage {
+  declarations: ImporterLedgerItem[]
+  page: number
+  page_size: number
+  total: number
   total_pages: number
 }
 
@@ -119,6 +178,7 @@ export interface ImporterQuery {
   page: number
   page_size: number
   q?: string
+  matched_only?: boolean
 }
 
 export interface Quality {
