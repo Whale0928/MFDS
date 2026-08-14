@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -273,8 +274,8 @@ func TestNormalizationStore_Sync_미싱과모호수입사를큐에멱등저장�
 		}
 	})
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	missingRCNO := fmt.Sprintf("NORM-MISSING-%d", time.Now().UnixNano())
-	ambiguousRCNO := fmt.Sprintf("NORM-AMBIGUOUS-%d", time.Now().UnixNano())
+	missingRCNO := fmt.Sprintf("NM-%d", time.Now().UnixNano())
+	ambiguousRCNO := fmt.Sprintf("NA-%d", time.Now().UnixNano())
 	missingItemID := fixture.item(t, missingRCNO, "missing-queue", now, now)
 	ambiguousItemID := fixture.item(t, ambiguousRCNO, "ambiguous-queue", now, now.AddDate(0, 0, 1))
 	if _, err := store.db.Exec(`UPDATE mfds_items SET importer_name = CASE id WHEN ? THEN ? WHEN ? THEN ? END WHERE id IN (?, ?)`,
@@ -317,8 +318,15 @@ func TestNormalizationStore_Sync_미싱과모호수입사를큐에멱등저장�
 	`, "큐 미싱 수입사").Scan(&status, &candidateCount, &declarationCount, &sampleRCNO, &description, &adminNote, &adminStatus, &candidates); err != nil {
 		t.Fatal(err)
 	}
+	var candidateSnapshot []struct {
+		Seed bool `json:"seed"`
+	}
+	if err := json.Unmarshal([]byte(candidates), &candidateSnapshot); err != nil {
+		t.Fatal(err)
+	}
 	if status != "AMBIGUOUS" || candidateCount != 7 || declarationCount != 1 || !sampleRCNO.Valid || sampleRCNO.String != missingRCNO ||
-		description != "seed description" || adminNote != "seed note" || adminStatus != "OPEN" || candidates != `[{"seed":true}]` {
+		description != "seed description" || adminNote != "seed note" || adminStatus != "OPEN" ||
+		len(candidateSnapshot) != 1 || !candidateSnapshot[0].Seed {
 		t.Fatalf("missing queue mismatch: status=%s candidates=%d declarations=%d sample=%v description=%q note=%q admin=%s candidates_json=%s",
 			status, candidateCount, declarationCount, sampleRCNO, description, adminNote, adminStatus, candidates)
 	}
