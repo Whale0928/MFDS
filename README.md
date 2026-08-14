@@ -50,8 +50,8 @@ task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
+task run -- normalize --force --limit 20000
 
-task run -- sync-company-registry --since YYYY-MM-DD
 task run -- match --all --dry-run
 task run -- match --all
 ```
@@ -61,6 +61,10 @@ regardless of its current state, while `--dry-run` changes no ledger row,
 declaration, lease, or timestamp. States are `PENDING`, `STALE`, `NORMALIZED`,
 `PARTIAL`, `REVIEW_REQUIRED`, and `UNPARSED`. Source `mfds_items` are never updated
 or deleted.
+`--force` marks existing terminal declarations `STALE` once and re-normalizes up
+to `--limit` rows. Source data, prior derived values, administrator importer links,
+and manual matching choices remain until replacement results are stored. It cannot
+be combined with `--rcno` or `--dry-run`.
 `collect-recent` takes no arguments and append-only collects the seven calendar
 days ending today in KST. Repeated runs intentionally preserve overlapping
 observations. It does not run normalization.
@@ -91,24 +95,29 @@ by `task setup`. Flyway migrations live in
 `git.environment-variables/storage/db/migration`. MFDS-only sqlc schema, queries,
 and generated code live in `git.secrets`.
 
-The FoodSafetyKorea company registry uses a separate credential:
+V12 creates `mfds_importers` and `mfds_missing_importers`. It embeds a fixed seed
+from a sequential 2026-08-15 KST lookup of the ledger's 397 trade names on the
+official Imported Food Information Maru domestic-business pages: 368 unique exact
+matches become importers, while 21 multiple-candidate and 8 missing results enter
+the administrator queue. It never chooses the first candidate arbitrarily.
 
-```text
-FOODSAFETYKOREA_API_KEY
+Normalization links `mfds_declarations.importer_id` as `AUTO` only when the trimmed
+source `importer_name` has exactly one binary-exact official `business_name` match.
+Zero or multiple matches remain nullable and refresh declaration counts, sample
+RCNO, and dates in `mfds_missing_importers`. `ADMIN` links, source text,
+`importer_base_name`, and `importer_search_key` survive re-normalization.
+
+The command below regenerates the seed. It requires exactly 397 unique, nonblank
+input names, uses only exact official-screen results, validates both the JSON
+manifest and SQL, and inserts the generated section into V12.
+
+```bash
+go run ./tools/importer-seed \
+  --input importer-business-names.txt \
+  --manifest-output /tmp/mfds-importer-seed.json \
+  --sql-output /tmp/mfds-importer-seed.sql \
+  --migration-output git.environment-variables/storage/db/migration/V12__add_mfds_importers.sql
 ```
-
-`sync-company-registry` sequentially collects importer business licenses (C001),
-importer closures (I2821), excellent importers (I0250), and administrative
-dispositions (I0470). The first run requires `--since`; later runs reuse the
-last completed date as an inclusive `CHNG_DT` boundary. Excellent importers
-(I0250) has no change-date filter and is fetched in full each time. Request and
-row originals are appended to separate raw ledgers without changing `mfds_items`
-or `mfds_declarations`.
-
-No persistent importer-link table is created. When an import detail is opened,
-the dashboard queries the current database by exact importer/business name and
-returns every license with that name. Official limits remain 1,000 rows per
-request and 500 requests per synchronization run.
 
 ## Structure
 
@@ -117,14 +126,14 @@ cmd/                         Cobra commands
 internal/app/                application wiring
 internal/config/             YAML and database environment loading
 internal/source/mfdsweb/     HTTP client and HTML parser
-internal/source/foodsafetykorea/ FoodSafetyKorea JSON client
+internal/source/mfdscompany/ official domestic-business HTML client/parser
 internal/usecase/weblist/    collection and RCNO reconciliation
-internal/usecase/companyregistry/ incremental company registry collection
 internal/normalization/      pure normalization rules and parsers
 internal/matching/           immutable alcohol, distillery, and region matcher
 internal/usecase/normalization/ normalization batch and state transitions
 internal/usecase/matching/   matching dry-run and backfill orchestration
 internal/store/mysql/        ledger and normalization persistence
+tools/importer-seed/         official 397-name importer seed generator
 data/config.yaml             non-secret runtime constants
 ```
 

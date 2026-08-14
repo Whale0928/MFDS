@@ -6,11 +6,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 )
+
+var normalizationImporterSequence uint64
 
 func normalizationStore(t *testing.T) *Store {
 	t.Helper()
@@ -110,6 +114,339 @@ func normalizationRequest(rcno, owner string) normalization.ClaimRequest {
 	return normalization.ClaimRequest{
 		Limit: 1, RCNO: rcno, Owner: owner, LeaseDuration: time.Minute,
 		MaxAttempts: 3, RetryDelay: time.Second,
+	}
+}
+
+func insertNormalizationImporter(t *testing.T, store *Store, businessName string, observedAt time.Time) uint64 {
+	t.Helper()
+	businessName = strings.TrimSpace(businessName)
+	nameKey := sha256.Sum256([]byte(businessName))
+	sequence := atomic.AddUint64(&normalizationImporterSequence, 1)
+	officialBusinessCode := fmt.Sprintf("TEST-%020d", sequence)
+	licenseNo := fmt.Sprintf("TEST-LICENSE-%020d", sequence)
+	sourceListURL := "https://test.invalid/importers/" + officialBusinessCode
+	sourceDetailURL := sourceListURL + "/detail"
+	sourceListHash := sha256.Sum256([]byte(sourceListURL))
+	sourceDetailHash := sha256.Sum256([]byte(sourceDetailURL))
+	result, err := store.db.Exec(`
+		INSERT INTO mfds_importers (
+			official_business_code, license_no, business_name, business_name_key_sha256,
+			operating_status, source_list_url, source_detail_url,
+			source_list_sha256, source_detail_sha256, source_observed_at
+		) VALUES (?, ?, ?, ?, 'UNKNOWN', ?, ?, ?, ?, ?)
+	`, officialBusinessCode, licenseNo, businessName, nameKey[:], sourceListURL, sourceDetailURL,
+		sourceListHash[:], sourceDetailHash[:], observedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	importerID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uint64(importerID)
+}
+
+func insertMissingNormalizationImporter(
+	t *testing.T,
+	store *Store,
+	businessName, matchStatus, adminStatus, candidatesJSON, description, adminNote string,
+	resolvedImporterID any,
+) {
+	t.Helper()
+	nameKey := sha256.Sum256([]byte(businessName))
+	_, err := store.db.Exec(`
+		INSERT INTO mfds_missing_importers (
+			source_importer_name, source_name_key_sha256, match_status, candidate_count,
+			candidates_json, declaration_count, admin_status, resolved_importer_id,
+			description, admin_note
+		) VALUES (?, ?, ?, 0, ?, 0, ?, ?, ?, ?)
+	`, businessName, nameKey[:], matchStatus, candidatesJSON, adminStatus, resolvedImporterID, description, adminNote)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNormalizationStore_Complete_원장수입사명Exact일치_ID를연결하고정제문자열을유지한다(t *testing.T) {
+	store := normalizationStore(t)
+	var importerID uint64
+	t.Cleanup(func() {
+		if importerID > 0 {
+			if _, err := store.db.Exec("DELETE FROM mfds_importers WHERE id = ?", importerID); err != nil {
+				t.Errorf("importer cleanup failed: %v", err)
+			}
+		}
+	})
+	fixture := newNormalizationFixture(t, store)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	importerID = insertNormalizationImporter(t, store, "주식회사 테스트 수입사", now)
+	rcno := fmt.Sprintf("NI-E-%d", time.Now().UnixNano())
+	itemID := fixture.item(t, rcno, "importer-exact", now, now)
+	if _, err := store.db.Exec("UPDATE mfds_items SET importer_name = ? WHERE id = ?", "주식회사 테스트 수입사", itemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "importer-exact-worker"))
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("claim=%+v error=%v", sources, err)
+	}
+	if err := store.Complete(context.Background(), normalization.Completion{
+		Source: sources[0],
+		Result: normalization.Result{Status: normalization.StatusNormalized, Fields: normalization.Fields{
+			ImporterBaseName: "테스트 수입사", ImporterSearchKey: "테스트수입사",
+		}},
+		NormalizationVersion: "normalization-test", NormalizedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var storedImporterID uint64
+	var importerBaseName, importerSearchKey string
+	var importerLinkedAt sql.NullTime
+	if err := store.db.QueryRow(`
+		SELECT importer_id, importer_base_name, importer_search_key, importer_linked_at
+		FROM mfds_declarations WHERE rcno = ?
+	`, rcno).Scan(&storedImporterID, &importerBaseName, &importerSearchKey, &importerLinkedAt); err != nil {
+		t.Fatal(err)
+	}
+	if storedImporterID != importerID || importerBaseName != "테스트 수입사" || importerSearchKey != "테스트수입사" || !importerLinkedAt.Valid {
+		t.Fatalf("importer_id=%d base=%q search=%q linked_at=%v", storedImporterID, importerBaseName, importerSearchKey, importerLinkedAt)
+	}
+}
+
+func TestNormalizationStore_Complete_공백차이는Exact일치로연결하지않는다(t *testing.T) {
+	store := normalizationStore(t)
+	t.Cleanup(func() {
+		if _, err := store.db.Exec("DELETE FROM mfds_missing_importers WHERE source_importer_name = ?", "테스트 수입사"); err != nil {
+			t.Errorf("missing importer cleanup failed: %v", err)
+		}
+	})
+	var importerID uint64
+	t.Cleanup(func() {
+		if importerID > 0 {
+			if _, err := store.db.Exec("DELETE FROM mfds_importers WHERE id = ?", importerID); err != nil {
+				t.Errorf("importer cleanup failed: %v", err)
+			}
+		}
+	})
+	fixture := newNormalizationFixture(t, store)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	importerID = insertNormalizationImporter(t, store, "테스트수입사", now)
+	rcno := fmt.Sprintf("NI-N-%d", time.Now().UnixNano())
+	fixture.item(t, rcno, "importer-nonexact", now, now)
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "importer-nonexact-worker"))
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("claim=%+v error=%v", sources, err)
+	}
+	if err := store.Complete(context.Background(), normalization.Completion{
+		Source: sources[0], Result: normalization.Result{Status: normalization.StatusNormalized},
+		NormalizationVersion: "normalization-test", NormalizedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var storedImporterID sql.NullInt64
+	if err := store.db.QueryRow("SELECT importer_id FROM mfds_declarations WHERE rcno = ?", rcno).Scan(&storedImporterID); err != nil {
+		t.Fatal(err)
+	}
+	if storedImporterID.Valid {
+		t.Fatalf("importer_id=%d, want NULL", storedImporterID.Int64)
+	}
+}
+
+func TestNormalizationStore_Sync_미싱과모호수입사를큐에멱등저장한다(t *testing.T) {
+	store := normalizationStore(t)
+	var importerIDs []uint64
+	t.Cleanup(func() {
+		for _, importerID := range importerIDs {
+			if _, err := store.db.Exec("DELETE FROM mfds_importers WHERE id = ?", importerID); err != nil {
+				t.Errorf("importer cleanup failed: %v", err)
+			}
+		}
+	})
+	fixture := newNormalizationFixture(t, store)
+	t.Cleanup(func() {
+		if _, err := store.db.Exec(`DELETE FROM mfds_missing_importers WHERE source_importer_name IN (?, ?)`, "큐 미싱 수입사", "큐 모호 수입사"); err != nil {
+			t.Errorf("missing importer cleanup failed: %v", err)
+		}
+	})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	missingRCNO := fmt.Sprintf("NORM-MISSING-%d", time.Now().UnixNano())
+	ambiguousRCNO := fmt.Sprintf("NORM-AMBIGUOUS-%d", time.Now().UnixNano())
+	missingItemID := fixture.item(t, missingRCNO, "missing-queue", now, now)
+	ambiguousItemID := fixture.item(t, ambiguousRCNO, "ambiguous-queue", now, now.AddDate(0, 0, 1))
+	if _, err := store.db.Exec(`UPDATE mfds_items SET importer_name = CASE id WHEN ? THEN ? WHEN ? THEN ? END WHERE id IN (?, ?)`,
+		missingItemID, "큐 미싱 수입사", ambiguousItemID, "큐 모호 수입사", missingItemID, ambiguousItemID); err != nil {
+		t.Fatal(err)
+	}
+	insertMissingNormalizationImporter(t, store, "큐 미싱 수입사", "AMBIGUOUS", "OPEN", `[{"seed":true}]`, "seed description", "seed note", nil)
+	if _, err := store.db.Exec(`
+		UPDATE mfds_missing_importers
+		SET source_observed_at = ?, candidate_count = 7
+		WHERE source_importer_name = ?
+	`, now, "큐 미싱 수입사"); err != nil {
+		t.Fatal(err)
+	}
+	importerIDs = append(importerIDs,
+		insertNormalizationImporter(t, store, "큐 모호 수입사", now),
+		insertNormalizationImporter(t, store, "큐 모호 수입사", now),
+	)
+
+	for range 2 {
+		if err := store.SyncDeclarations(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var missingID sql.NullInt64
+	var missingSource sql.NullString
+	if err := store.db.QueryRow(`SELECT importer_id, importer_link_source FROM mfds_declarations WHERE rcno = ?`, missingRCNO).Scan(&missingID, &missingSource); err != nil {
+		t.Fatal(err)
+	}
+	if missingID.Valid || missingSource.Valid {
+		t.Fatalf("missing link=%v/%v, want NULL/NULL", missingID, missingSource)
+	}
+	var status, description, adminNote, adminStatus, candidates string
+	var candidateCount, declarationCount int
+	var sampleRCNO sql.NullString
+	if err := store.db.QueryRow(`
+		SELECT match_status, candidate_count, declaration_count, sample_rcno,
+		       description, admin_note, admin_status, candidates_json
+		FROM mfds_missing_importers WHERE source_importer_name = ?
+	`, "큐 미싱 수입사").Scan(&status, &candidateCount, &declarationCount, &sampleRCNO, &description, &adminNote, &adminStatus, &candidates); err != nil {
+		t.Fatal(err)
+	}
+	if status != "AMBIGUOUS" || candidateCount != 7 || declarationCount != 1 || !sampleRCNO.Valid || sampleRCNO.String != missingRCNO ||
+		description != "seed description" || adminNote != "seed note" || adminStatus != "OPEN" || candidates != `[{"seed":true}]` {
+		t.Fatalf("missing queue mismatch: status=%s candidates=%d declarations=%d sample=%v description=%q note=%q admin=%s candidates_json=%s",
+			status, candidateCount, declarationCount, sampleRCNO, description, adminNote, adminStatus, candidates)
+	}
+	if err := store.db.QueryRow(`SELECT importer_id, importer_link_source FROM mfds_declarations WHERE rcno = ?`, ambiguousRCNO).Scan(&missingID, &missingSource); err != nil {
+		t.Fatal(err)
+	}
+	if missingID.Valid || missingSource.Valid {
+		t.Fatalf("ambiguous link=%v/%v, want NULL/NULL", missingID, missingSource)
+	}
+	if err := store.db.QueryRow(`SELECT match_status, candidate_count FROM mfds_missing_importers WHERE source_importer_name = ?`, "큐 모호 수입사").Scan(&status, &candidateCount); err != nil {
+		t.Fatal(err)
+	}
+	if status != "AMBIGUOUS" || candidateCount != 2 {
+		t.Fatalf("ambiguous queue status=%s candidates=%d", status, candidateCount)
+	}
+}
+
+func TestNormalizationStore_Complete는업데이트후미싱통계를계산한다(t *testing.T) {
+	store := normalizationStore(t)
+	var importerIDs []uint64
+	t.Cleanup(func() {
+		for _, importerID := range importerIDs {
+			if _, err := store.db.Exec("DELETE FROM mfds_importers WHERE id = ?", importerID); err != nil {
+				t.Errorf("importer cleanup failed: %v", err)
+			}
+		}
+	})
+	fixture := newNormalizationFixture(t, store)
+	t.Cleanup(func() {
+		if _, err := store.db.Exec("DELETE FROM mfds_missing_importers WHERE source_importer_name = ?", "Complete 모호 수입사"); err != nil {
+			t.Errorf("missing importer cleanup failed: %v", err)
+		}
+	})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	name := "Complete 모호 수입사"
+	firstImporterID := insertNormalizationImporter(t, store, name, now)
+	importerIDs = append(importerIDs, firstImporterID)
+	rcno := fmt.Sprintf("NORM-COMPLETE-MISSING-%d", time.Now().UnixNano())
+	itemID := fixture.item(t, rcno, "complete-missing", now, now)
+	if _, err := store.db.Exec("UPDATE mfds_items SET importer_name = ? WHERE id = ?", name, itemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	secondImporterID := insertNormalizationImporter(t, store, name, now)
+	importerIDs = append(importerIDs, secondImporterID)
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "complete-missing-worker"))
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("claim=%+v error=%v", sources, err)
+	}
+	if err := store.Complete(context.Background(), normalization.Completion{
+		Source: sources[0], Result: normalization.Result{Status: normalization.StatusNormalized},
+		NormalizationVersion: "complete-missing-test", NormalizedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var importerID sql.NullInt64
+	if err := store.db.QueryRow("SELECT importer_id FROM mfds_declarations WHERE rcno = ?", rcno).Scan(&importerID); err != nil {
+		t.Fatal(err)
+	}
+	if importerID.Valid {
+		t.Fatalf("importer_id=%d, want NULL after ambiguous re-resolution", importerID.Int64)
+	}
+	var declarationCount int
+	if err := store.db.QueryRow(`SELECT declaration_count FROM mfds_missing_importers WHERE source_importer_name = ?`, name).Scan(&declarationCount); err != nil {
+		t.Fatal(err)
+	}
+	if declarationCount != 1 {
+		t.Fatalf("declaration_count=%d, want 1 after Complete", declarationCount)
+	}
+}
+
+func TestNormalizationStore_Sync와Complete는관리자수입사연결을보존한다(t *testing.T) {
+	store := normalizationStore(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	adminName := "관리자 확정 수입사"
+	adminID := insertNormalizationImporter(t, store, adminName, now)
+	t.Cleanup(func() {
+		if _, err := store.db.Exec("DELETE FROM mfds_importers WHERE id = ?", adminID); err != nil {
+			t.Errorf("importer cleanup failed: %v", err)
+		}
+	})
+	fixture := newNormalizationFixture(t, store)
+	t.Cleanup(func() {
+		if _, err := store.db.Exec("DELETE FROM mfds_missing_importers WHERE source_importer_name = ?", adminName); err != nil {
+			t.Errorf("missing importer cleanup failed: %v", err)
+		}
+	})
+	insertMissingNormalizationImporter(t, store, adminName, "MISSING", "RESOLVED", `[{"seed":true}]`, "keep description", "keep note", adminID)
+	rcno := fmt.Sprintf("NORM-ADMIN-%d", time.Now().UnixNano())
+	firstID := fixture.item(t, rcno, "admin-first", now, now)
+	if _, err := store.db.Exec("UPDATE mfds_items SET importer_name = ? WHERE id = ?", adminName, firstID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	latestID := fixture.item(t, rcno, "admin-drift", now.Add(time.Second), now.AddDate(0, 0, 1))
+	if _, err := store.db.Exec("UPDATE mfds_items SET importer_name = ? WHERE id = ?", adminName, latestID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var storedID uint64
+	var linkSource string
+	if err := store.db.QueryRow(`SELECT importer_id, importer_link_source FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&storedID, &linkSource); err != nil {
+		t.Fatal(err)
+	}
+	if storedID != adminID || linkSource != "ADMIN" {
+		t.Fatalf("after drift importer_id=%d source=%s, want %d/ADMIN", storedID, linkSource, adminID)
+	}
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "admin-worker"))
+	if err != nil || len(sources) != 1 || sources[0].SourceItemID != latestID {
+		t.Fatalf("claim=%+v error=%v", sources, err)
+	}
+	if err := store.Complete(context.Background(), normalization.Completion{
+		Source: sources[0], Result: normalization.Result{Status: normalization.StatusNormalized},
+		NormalizationVersion: "admin-test", NormalizedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRow(`SELECT importer_id, importer_link_source FROM mfds_declarations WHERE rcno = ?`, rcno).Scan(&storedID, &linkSource); err != nil {
+		t.Fatal(err)
+	}
+	if storedID != adminID || linkSource != "ADMIN" {
+		t.Fatalf("after complete importer_id=%d source=%s, want %d/ADMIN", storedID, linkSource, adminID)
 	}
 }
 
@@ -236,6 +573,113 @@ func TestNormalizationStore_ClaimFencing실패재시도와강제재정제를보�
 	forcedAgain, err := store.Claim(context.Background(), normalizationRequest(rcno, "worker-d"))
 	if err != nil || len(forcedAgain) != 1 || forcedAgain[0].ClaimAttempt != 4 {
 		t.Fatalf("force beyond max attempts=%+v error=%v", forcedAgain, err)
+	}
+}
+
+func TestNormalizationStore_ForceRequeue는상태와Claim필드만초기화하고기존검토값을보존한다(t *testing.T) {
+	// Given
+	store := normalizationStore(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	adminName := fmt.Sprintf("ForceRequeue 관리자 수입사 %d", time.Now().UnixNano())
+	adminID := insertNormalizationImporter(t, store, adminName, now)
+	t.Cleanup(func() {
+		if _, err := store.db.Exec("DELETE FROM mfds_importers WHERE id = ?", adminID); err != nil {
+			t.Errorf("importer cleanup failed: %v", err)
+		}
+	})
+	fixture := newNormalizationFixture(t, store)
+	rcno := fmt.Sprintf("NORM-FORCE-%d", time.Now().UnixNano())
+	itemID := fixture.item(t, rcno, "force-requeue", now, now)
+	if _, err := store.db.Exec("UPDATE mfds_items SET importer_name = '' WHERE id = ?", itemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`
+		UPDATE mfds_declarations
+		SET normalization_status = 'NORMALIZED', source_item_id = ?,
+		    base_product_name_ko = '기존 파생 상품명', normalization_version = 'old-version',
+		    normalized_at = ?, importer_id = ?, importer_link_source = 'ADMIN',
+		    selected_alcohol_id = 900, selected_distillery_id = 901, selected_region_id = 902,
+		    claim_owner = 'old-worker', claim_lease_until = DATE_ADD(NOW(6), INTERVAL 1 HOUR),
+		    claim_attempts = 3, claim_next_attempt_at = DATE_ADD(NOW(6), INTERVAL 1 HOUR),
+		    claim_last_error = 'old failure', review_status = 'APPROVED',
+		    reviewed_by = 'reviewer', reviewed_at = ?, review_note = 'keep review'
+		WHERE rcno = ?
+	`, itemID, now, adminID, now, rcno); err != nil {
+		t.Fatal(err)
+	}
+
+	type declarationState struct {
+		sourceItemID         int64
+		status               string
+		baseProductNameKO    sql.NullString
+		normalizationVersion sql.NullString
+		normalizedAt         sql.NullTime
+		importerID           sql.NullInt64
+		importerLinkSource   sql.NullString
+		selectedAlcoholID    sql.NullInt64
+		selectedDistilleryID sql.NullInt64
+		selectedRegionID     sql.NullInt64
+		claimOwner           sql.NullString
+		claimLeaseUntil      sql.NullTime
+		claimAttempts        int
+		claimNextAttemptAt   sql.NullTime
+		claimLastError       sql.NullString
+		reviewStatus         string
+		reviewedBy           sql.NullString
+		reviewedAt           sql.NullTime
+		reviewNote           sql.NullString
+	}
+	readState := func() declarationState {
+		t.Helper()
+		var state declarationState
+		err := store.db.QueryRow(`
+			SELECT source_item_id, normalization_status, base_product_name_ko,
+			       normalization_version, normalized_at, importer_id, importer_link_source,
+			       selected_alcohol_id, selected_distillery_id, selected_region_id,
+			       claim_owner, claim_lease_until, claim_attempts, claim_next_attempt_at,
+			       claim_last_error, review_status, reviewed_by, reviewed_at, review_note
+			FROM mfds_declarations WHERE rcno = ?
+		`, rcno).Scan(
+			&state.sourceItemID, &state.status, &state.baseProductNameKO,
+			&state.normalizationVersion, &state.normalizedAt, &state.importerID,
+			&state.importerLinkSource, &state.selectedAlcoholID, &state.selectedDistilleryID,
+			&state.selectedRegionID, &state.claimOwner, &state.claimLeaseUntil,
+			&state.claimAttempts, &state.claimNextAttemptAt, &state.claimLastError,
+			&state.reviewStatus, &state.reviewedBy, &state.reviewedAt, &state.reviewNote,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	before := readState()
+	if before.status != string(normalization.StatusNormalized) || before.sourceItemID != itemID ||
+		!before.importerID.Valid || before.importerID.Int64 != int64(adminID) ||
+		!before.importerLinkSource.Valid || before.importerLinkSource.String != "ADMIN" {
+		t.Fatalf("baseline state = %+v", before)
+	}
+
+	// When
+	if err := store.ForceRequeue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Then
+	after := readState()
+	if after.status != string(normalization.StatusStale) || after.claimAttempts != 0 ||
+		after.claimOwner.Valid || after.claimLeaseUntil.Valid || after.claimNextAttemptAt.Valid || after.claimLastError.Valid {
+		t.Fatalf("requeue state = %+v", after)
+	}
+	if after.sourceItemID != before.sourceItemID || after.baseProductNameKO != before.baseProductNameKO ||
+		after.normalizationVersion != before.normalizationVersion || after.normalizedAt != before.normalizedAt ||
+		after.importerID != before.importerID || after.importerLinkSource != before.importerLinkSource ||
+		after.selectedAlcoholID != before.selectedAlcoholID || after.selectedDistilleryID != before.selectedDistilleryID ||
+		after.selectedRegionID != before.selectedRegionID || after.reviewStatus != before.reviewStatus ||
+		after.reviewedBy != before.reviewedBy || after.reviewedAt != before.reviewedAt || after.reviewNote != before.reviewNote {
+		t.Fatalf("force requeue changed preserved fields: before=%+v after=%+v", before, after)
 	}
 }
 

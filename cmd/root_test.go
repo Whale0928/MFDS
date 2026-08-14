@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
-	"github.com/bottle-note/mfds-crawler/internal/usecase/companyregistry"
 	matchingusecase "github.com/bottle-note/mfds-crawler/internal/usecase/matching"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
@@ -41,12 +40,12 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
-	for _, command := range []string{"collect", "collect-recent", "sync-company-registry", "health", "match", "normalize"} {
+	for _, command := range []string{"collect", "collect-recent", "health", "match", "normalize"} {
 		if !strings.Contains(output.String(), command) {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
 	}
-	for _, removed := range []string{"all", "api", "completion", "config", "db", "run", "verify", "web"} {
+	for _, removed := range []string{"all", "api", "completion", "config", "db", "run", "sync-company-registry", "verify", "web"} {
 		if strings.Contains(output.String(), "\n  "+removed+" ") {
 			t.Fatalf("removed command %q remains in output = %q", removed, output.String())
 		}
@@ -100,26 +99,17 @@ func newTestRootWithRunner(
 		OpenDatabase: func(config.DatabaseConfig) (Database, error) {
 			return database, nil
 		},
-		RunWebListJob:      runWebListJob,
-		RunCompanyRegistry: successfulCompanyRegistryCollection,
-		RunNormalization:   successfulNormalization,
-		RunMatching:        successfulMatching,
-		Out:                output,
-		ErrOut:             output,
+		RunWebListJob:    runWebListJob,
+		RunNormalization: successfulNormalization,
+		RunMatching:      successfulMatching,
+		Out:              output,
+		ErrOut:           output,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(filepath.Dir(filepath.Dir(configFile)))
 	return root, output
-}
-
-func successfulCompanyRegistryCollection(
-	context.Context,
-	config.Config,
-	CompanyRegistrySyncCommand,
-) (companyregistry.Summary, error) {
-	return companyregistry.Summary{}, nil
 }
 
 func successfulMatching(

@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -83,14 +84,47 @@ func (s *Store) SyncDeclarations(ctx context.Context) error {
 			    d.review_note = CASE
 			        WHEN previous.semantic_sha256 <=> current.semantic_sha256 THEN d.review_note ELSE NULL
 			    END,
+			    d.importer_id = CASE
+			        WHEN previous.semantic_sha256 <=> current.semantic_sha256 THEN d.importer_id
+			        WHEN d.importer_link_source = 'ADMIN' THEN d.importer_id ELSE NULL
+			    END,
+			    d.importer_link_source = CASE
+			        WHEN previous.semantic_sha256 <=> current.semantic_sha256 THEN d.importer_link_source
+			        WHEN d.importer_link_source = 'ADMIN' THEN d.importer_link_source ELSE NULL
+			    END,
+			    d.importer_linked_at = CASE
+			        WHEN previous.semantic_sha256 <=> current.semantic_sha256 THEN d.importer_linked_at
+			        WHEN d.importer_link_source = 'ADMIN' THEN d.importer_linked_at ELSE NULL
+			    END,
 			    d.source_item_id = latest.id
 			WHERE d.source_item_id <> latest.id
 		`)
 		if err != nil {
 			return fmt.Errorf("declaration 최신 원본 갱신 실패: %w", err)
 		}
+		if err := s.syncImporterLinks(ctx, tx); err != nil {
+			return err
+		}
 		return nil
 	})
+}
+
+// ForceRequeue marks terminal declarations stale while preserving source and derived values.
+func (s *Store) ForceRequeue(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE mfds_declarations
+		SET normalization_status = 'STALE',
+		    claim_owner = NULL,
+		    claim_lease_until = NULL,
+		    claim_attempts = 0,
+		    claim_next_attempt_at = NULL,
+		    claim_last_error = NULL
+		WHERE normalization_status IN ('NORMALIZED', 'PARTIAL', 'REVIEW_REQUIRED', 'UNPARSED')
+	`)
+	if err != nil {
+		return fmt.Errorf("terminal normalization 재정제 requeue 실패: %w", err)
+	}
+	return nil
 }
 
 // Claim atomically leases PENDING/STALE declarations. An RCNO request ignores
@@ -264,8 +298,45 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	}
 	fields := completion.Result.Fields
 	status := string(completion.Result.Status)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("normalization 결과 transaction 시작 실패: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var sourceImporterName sql.NullString
+	err = tx.QueryRowContext(ctx, `
+		SELECT TRIM(COALESCE(importer_name, ''))
+		FROM mfds_items
+		WHERE id = ?
+	`, completion.Source.SourceItemID).Scan(&sourceImporterName)
+	if err != nil {
+		return fmt.Errorf("원장 수입사명 조회 실패: %w", err)
+	}
+	importerID, importerLinkSource, candidateCount, err := resolveImporterLink(ctx, tx, sourceImporterName.String)
+	if err != nil {
+		return err
+	}
+	var existingImporterID sql.NullInt64
+	var existingLinkSource sql.NullString
+	err = tx.QueryRowContext(ctx, `
+		SELECT importer_id, importer_link_source
+		FROM mfds_declarations
+		WHERE id = ? AND rcno = ? AND source_item_id = ?
+	`, completion.Source.DeclarationID, completion.Source.RCNO, completion.Source.SourceItemID).Scan(
+		&existingImporterID, &existingLinkSource,
+	)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("기존 정제 수입사 연결 조회 실패: %w", err)
+	}
+	preserveAdminLink := existingLinkSource.Valid && existingLinkSource.String == "ADMIN"
+	if preserveAdminLink {
+		if existingImporterID.Valid {
+			importerID = uint64(existingImporterID.Int64)
+		}
+		importerLinkSource = "ADMIN"
+	}
 
-	assign := newColumnAssignments(60)
+	assign := newColumnAssignments(61)
 	assign.set("base_product_name_ko", nullableString(fields.BaseProductNameKO))
 	assign.set("base_product_name_en", nullableString(fields.BaseProductNameEN))
 	assign.set("sku_display_name_ko", nullableString(fields.SKUDisplayNameKO))
@@ -306,6 +377,13 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 
 	assign.set("importer_base_name", nullableString(fields.ImporterBaseName))
 	assign.set("importer_search_key", nullableString(fields.ImporterSearchKey))
+	assign.setExpression(`importer_linked_at = CASE
+			WHEN importer_id <=> ? AND importer_link_source <=> ? THEN importer_linked_at
+			WHEN ? IS NULL THEN NULL
+			ELSE NOW(6)
+		END`, importerID, nullableString(importerLinkSource), importerID)
+	assign.set("importer_id", importerID)
+	assign.set("importer_link_source", nullableString(importerLinkSource))
 	assign.set("legal_entity_type", nullableString(fields.LegalEntityType))
 	assign.set("manufacturer_name", nullableString(fields.ManufacturerName))
 	assign.set("overseas_establishment_search_key", nullableString(fields.OverseasEstablishmentSearchKey))
@@ -357,11 +435,6 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		        ELSE 'NOT_REQUIRED'
 		    END`, status)
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("normalization 결과 transaction 시작 실패: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `
 		UPDATE mfds_declarations
 		SET `+assign.clause()+`
@@ -377,6 +450,11 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	if err := requireNormalizationLease(result, "normalization 결과 저장"); err != nil {
 		return err
 	}
+	if importerID == nil && !preserveAdminLink && sourceImporterName.String != "" {
+		if err := refreshMissingImporterQueue(ctx, tx, sourceImporterName.String, candidateCount); err != nil {
+			return err
+		}
+	}
 	if fields.MatchingRunID > 0 {
 		if err := saveMatchingRecords(ctx, tx, fields.MatchingRunID, completion.Source.DeclarationID, fields.MatchingResult, completion.NormalizedAt); err != nil {
 			return err
@@ -386,6 +464,185 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		return fmt.Errorf("normalization 결과 transaction commit 실패: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) syncImporterLinks(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT MIN(TRIM(COALESCE(item.importer_name, ''))) AS business_name
+		FROM mfds_declarations AS d
+		JOIN mfds_items AS item ON item.id = d.source_item_id
+		WHERE COALESCE(d.importer_link_source, '') <> 'ADMIN'
+		  AND NULLIF(TRIM(item.importer_name), '') IS NOT NULL
+		GROUP BY CAST(TRIM(COALESCE(item.importer_name, '')) AS BINARY)
+	`)
+	if err != nil {
+		return fmt.Errorf("정제 수입사 연결 후보 조회 실패: %w", err)
+	}
+	defer rows.Close()
+	businessNames := make([]string, 0)
+	for rows.Next() {
+		var businessName string
+		if err := rows.Scan(&businessName); err != nil {
+			return fmt.Errorf("정제 수입사 연결 후보 scan 실패: %w", err)
+		}
+		businessNames = append(businessNames, businessName)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("정제 수입사 연결 후보 순회 실패: %w", err)
+	}
+
+	missing := make(map[string]int)
+	for _, businessName := range businessNames {
+		importerID, linkSource, candidateCount, err := resolveImporterLink(ctx, tx, businessName)
+		if err != nil {
+			return err
+		}
+		if importerID == nil {
+			linkSource = ""
+			missing[businessName] = candidateCount
+		}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE mfds_declarations AS declaration
+			JOIN mfds_items AS item ON item.id = declaration.source_item_id
+			SET declaration.importer_linked_at = CASE
+			        WHEN declaration.importer_id <=> ? AND declaration.importer_link_source <=> ? THEN declaration.importer_linked_at
+			        WHEN ? IS NULL THEN NULL
+			        ELSE NOW(6)
+			    END,
+			    declaration.importer_id = ?,
+			    declaration.importer_link_source = ?
+			WHERE COALESCE(declaration.importer_link_source, '') <> 'ADMIN'
+			  AND CAST(TRIM(COALESCE(item.importer_name, '')) AS BINARY) = CAST(? AS BINARY)
+			  AND NOT (declaration.importer_id <=> ? AND declaration.importer_link_source <=> ?)
+		`, importerID, nullableString(linkSource), importerID, importerID, nullableString(linkSource),
+			businessName, importerID, nullableString(linkSource))
+		if err != nil {
+			return fmt.Errorf("정제 수입사 연결 저장 실패: %w", err)
+		}
+	}
+	for businessName, candidateCount := range missing {
+		if err := refreshMissingImporterQueue(ctx, tx, businessName, candidateCount); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resolveImporterLink(ctx context.Context, tx *sql.Tx, sourceImporterName string) (any, string, int, error) {
+	businessName := strings.TrimSpace(sourceImporterName)
+	if businessName == "" {
+		return nil, "", 0, nil
+	}
+	nameKey := sha256.Sum256([]byte(businessName))
+	var resolvedImporterID sql.NullInt64
+	err := tx.QueryRowContext(ctx, `
+		SELECT resolved_importer_id
+		FROM mfds_missing_importers
+		WHERE source_name_key_sha256 = ?
+		  AND CAST(source_importer_name AS BINARY) = CAST(? AS BINARY)
+		  AND admin_status = 'RESOLVED'
+		  AND resolved_importer_id IS NOT NULL
+	`, nameKey[:], businessName).Scan(&resolvedImporterID)
+	if err == nil && resolvedImporterID.Valid {
+		return uint64(resolvedImporterID.Int64), "ADMIN", 1, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, "", 0, fmt.Errorf("관리자 수입사 resolution 조회 실패: %w", err)
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id
+		FROM mfds_importers
+		WHERE business_name_key_sha256 = ?
+		  AND CAST(business_name AS BINARY) = CAST(? AS BINARY)
+	`, nameKey[:], businessName)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("정제 수입사 exact 조회 실패: %w", err)
+	}
+	defer rows.Close()
+	var importerID uint64
+	candidateCount := 0
+	for rows.Next() {
+		candidateCount++
+		if candidateCount == 1 {
+			if err := rows.Scan(&importerID); err != nil {
+				return nil, "", 0, fmt.Errorf("정제 수입사 exact scan 실패: %w", err)
+			}
+			continue
+		}
+		var ignoredID uint64
+		if err := rows.Scan(&ignoredID); err != nil {
+			return nil, "", 0, fmt.Errorf("정제 수입사 exact scan 실패: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", 0, fmt.Errorf("정제 수입사 exact 순회 실패: %w", err)
+	}
+	if candidateCount == 1 {
+		return importerID, "AUTO", candidateCount, nil
+	}
+	return nil, "", candidateCount, nil
+}
+
+func refreshMissingImporterQueue(ctx context.Context, tx *sql.Tx, sourceImporterName string, candidateCount int) error {
+	businessName := strings.TrimSpace(sourceImporterName)
+	if businessName == "" {
+		return nil
+	}
+	nameKey := sha256.Sum256([]byte(businessName))
+	var declarationCount int64
+	var firstProcessedDate, lastProcessedDate sql.NullTime
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(item.processed_date), MAX(item.processed_date)
+		FROM mfds_declarations AS declaration
+		JOIN mfds_items AS item ON item.id = declaration.source_item_id
+		WHERE declaration.importer_id IS NULL
+		  AND CAST(TRIM(COALESCE(item.importer_name, '')) AS BINARY) = CAST(? AS BINARY)
+	`, businessName).Scan(&declarationCount, &firstProcessedDate, &lastProcessedDate)
+	if err != nil {
+		return fmt.Errorf("미싱 수입사 통계 조회 실패: %w", err)
+	}
+	var sampleRCNO sql.NullString
+	err = tx.QueryRowContext(ctx, `
+		SELECT declaration.rcno
+		FROM mfds_declarations AS declaration
+		JOIN mfds_items AS item ON item.id = declaration.source_item_id
+		WHERE declaration.importer_id IS NULL
+		  AND CAST(TRIM(COALESCE(item.importer_name, '')) AS BINARY) = CAST(? AS BINARY)
+		ORDER BY item.processed_date DESC, item.id DESC
+		LIMIT 1
+	`, businessName).Scan(&sampleRCNO)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("미싱 수입사 sample 조회 실패: %w", err)
+	}
+	matchStatus := "MISSING"
+	if candidateCount > 1 {
+		matchStatus = "AMBIGUOUS"
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO mfds_missing_importers (
+			source_importer_name, source_name_key_sha256, match_status, candidate_count,
+			candidates_json, declaration_count, sample_rcno, first_processed_date, last_processed_date
+		) VALUES (?, ?, ?, ?, JSON_ARRAY(), ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			match_status = CASE WHEN source_observed_at IS NOT NULL THEN match_status ELSE VALUES(match_status) END,
+			candidate_count = CASE WHEN source_observed_at IS NOT NULL THEN candidate_count ELSE VALUES(candidate_count) END,
+			candidates_json = CASE WHEN source_observed_at IS NOT NULL THEN candidates_json ELSE VALUES(candidates_json) END,
+			declaration_count = VALUES(declaration_count), sample_rcno = VALUES(sample_rcno),
+			first_processed_date = VALUES(first_processed_date), last_processed_date = VALUES(last_processed_date)
+	`, businessName, nameKey[:], matchStatus, candidateCount, declarationCount,
+		nullString(sampleRCNO.String), nullableSQLTime(firstProcessedDate), nullableSQLTime(lastProcessedDate))
+	if err != nil {
+		return fmt.Errorf("미싱 수입사 큐 upsert 실패: %w", err)
+	}
+	return nil
+}
+
+func nullableSQLTime(value sql.NullTime) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Time
 }
 
 func storedNormalizationCandidates(candidates []normalization.ReferenceCandidate) []storedCandidate {

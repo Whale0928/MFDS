@@ -50,14 +50,18 @@ task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
+task run -- normalize --force --limit 20000
 
-task run -- sync-company-registry --since YYYY-MM-DD
 task run -- match --all --dry-run
 task run -- match --all
 ```
 
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
 재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
+`--force`는 기존 terminal 정제 행을 한 번만 `STALE`로 되돌린 뒤 지정한
+`--limit` 범위로 재정제합니다. 원본·기존 정제값·관리자 수입사 연결과 수동
+매칭 선택은 새 결과가 저장되기 전까지 보존됩니다. `--force`는 `--rcno`,
+`--dry-run`과 함께 사용할 수 없습니다.
 정제 상태는 `PENDING`, `STALE`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`,
 `UNPARSED`로 구분합니다. 원문 `mfds_items`는 수정하거나 삭제하지 않습니다.
 `collect-recent`는 인자 없이 KST 오늘을 포함한 최근 7일을 append-only로
@@ -90,23 +94,28 @@ Flyway migration은 `git.environment-variables/storage/db/migration`에서
 관리합니다. MFDS 전용 sqlc 입력 스키마·쿼리와 생성 코드는 `git.secrets`에서
 관리합니다.
 
-식품안전나라 업체 원장은 별도 키를 사용합니다.
+V12는 `mfds_importers`와 `mfds_missing_importers`를 만듭니다. 2026-08-15 KST에
+원장의 397개 상호를 수입식품정보마루 국내업소 화면에서 순차 조회한 결과를 고정
+seed로 포함하며, 공식 exact 단일 결과 368개는 수입사로, 복수 후보 21개와 결과
+없음 8개는 어드민 관리 큐로 저장합니다. 임의의 첫 후보는 선택하지 않습니다.
 
-```text
-FOODSAFETYKOREA_API_KEY
+정제 시 원장 `importer_name`을 trim한 값과 공식 `business_name`이 binary exact로
+한 건만 일치할 때 `mfds_declarations.importer_id`를 `AUTO`로 연결합니다. 0건 또는
+복수이면 nullable 연결을 유지하고 `mfds_missing_importers`의 원장 건수·예시 RCNO·
+기간을 갱신합니다. 어드민에서 확정한 `ADMIN` 연결과 원장 원문,
+`importer_base_name`, `importer_search_key`는 재정제해도 보존합니다.
+
+seed 재생성은 아래 도구로 수행합니다. 입력은 공백 제외 397개 고유 상호여야 하고,
+공식 화면의 exact 결과만 사용하며 JSON manifest와 SQL을 모두 검증한 뒤 V12 생성
+구간에 삽입합니다.
+
+```bash
+go run ./tools/importer-seed \
+  --input importer-business-names.txt \
+  --manifest-output /tmp/mfds-importer-seed.json \
+  --sql-output /tmp/mfds-importer-seed.sql \
+  --migration-output git.environment-variables/storage/db/migration/V12__add_mfds_importers.sql
 ```
-
-`sync-company-registry`는 수입식품 영업신고 정보(C001), 수입식품업 폐업정보
-(I2821), 우수수입업소 현황(I0250), 행정처분 결과(I0470)를 직렬로 수집합니다.
-최초 실행에는 `--since`가 필요하고, 이후에는 마지막 완료 실행의 기준일을 다시
-포함해 변경일자(`CHNG_DT`) 기준으로 증분 동기화합니다. 변경일자 필터가 없는
-우수수입업소 현황(I0250)은 매번 전체를 조회합니다. 요청·행 원문은 별도 원본(raw)
-원장에 추가하며 기존 `mfds_items`와 `mfds_declarations`는 수정하지 않습니다.
-
-업체 연결 테이블은 만들지 않습니다. 대시보드가 수입 기록 상세를 열 때 원장의
-수입사명과 공식 업소명을 그대로 비교해 현재 데이터베이스를 조회하며, 같은 이름의
-복수 인허가도 모두 보여줍니다. 공식 제한에 따라 요청당 1,000행, 동기화 실행당
-500회로 제한합니다.
 
 ## 구조
 
@@ -115,14 +124,14 @@ cmd/                         Cobra 명령
 internal/app/                애플리케이션 조립
 internal/config/             YAML과 DB 환경 변수 로딩
 internal/source/mfdsweb/     HTTP client와 HTML parser
-internal/source/foodsafetykorea/ 식품안전나라 JSON client
+internal/source/mfdscompany/ 수입식품정보마루 국내업소 HTML client/parser
 internal/usecase/weblist/    수집과 RCNO 대조
-internal/usecase/companyregistry/ 업체 공식정보 증분 수집
 internal/normalization/      순수 정제 규칙과 파서
 internal/matching/           불변 alcohol·증류소·리전 matcher
 internal/usecase/normalization/ 정제 batch와 상태 전이
 internal/usecase/matching/   매칭 dry-run과 백필 조정
 internal/store/mysql/        원장과 정제 결과 저장
+tools/importer-seed/         397개 공식 수입사 seed 생성기
 data/config.yaml             비밀이 아닌 고정 실행값
 ```
 

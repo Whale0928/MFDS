@@ -28,7 +28,28 @@ func TestNormalize_기본실행_Config기본값으로Runner를호출한다(t *te
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if captured.Limit != 0 || captured.RCNO != "" || captured.DryRun {
+	if captured.Limit != 0 || captured.RCNO != "" || captured.DryRun || captured.Force {
+		t.Fatalf("command = %+v", captured)
+	}
+}
+
+func TestNormalize_Force_정제명령에Force를전달한다(t *testing.T) {
+	// Given
+	var captured normalization.Command
+	command := newNormalizeCommand(func() config.Config { return config.Config{} }, func(_ context.Context, _ config.Config, received normalization.Command) (normalization.Summary, error) {
+		captured = received
+		return normalization.Summary{}, nil
+	}, &strings.Builder{})
+	command.SetArgs([]string{"--force", "--limit", "12294"})
+
+	// When
+	err := command.Execute()
+
+	// Then
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !captured.Force || captured.Limit != 12294 {
 		t.Fatalf("command = %+v", captured)
 	}
 }
@@ -47,6 +68,48 @@ func TestNormalize_Limit과RCNO동시지정_오류를반환한다(t *testing.T) 
 
 	// Then
 	if err == nil || !strings.Contains(err.Error(), "함께 사용할 수 없습니다") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if called {
+		t.Fatal("runner was called")
+	}
+}
+
+func TestNormalize_Force와RCNO동시지정_오류를반환한다(t *testing.T) {
+	// Given
+	called := false
+	command := newNormalizeCommand(func() config.Config { return config.Config{} }, func(context.Context, config.Config, normalization.Command) (normalization.Summary, error) {
+		called = true
+		return normalization.Summary{}, nil
+	}, &strings.Builder{})
+	command.SetArgs([]string{"--force", "--rcno", "R-1"})
+
+	// When
+	err := command.Execute()
+
+	// Then
+	if err == nil || !strings.Contains(err.Error(), "force와 rcno는 함께 사용할 수 없습니다") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if called {
+		t.Fatal("runner was called")
+	}
+}
+
+func TestNormalize_Force와DryRun동시지정_오류를반환한다(t *testing.T) {
+	// Given
+	called := false
+	command := newNormalizeCommand(func() config.Config { return config.Config{} }, func(context.Context, config.Config, normalization.Command) (normalization.Summary, error) {
+		called = true
+		return normalization.Summary{}, nil
+	}, &strings.Builder{})
+	command.SetArgs([]string{"--force", "--dry-run"})
+
+	// When
+	err := command.Execute()
+
+	// Then
+	if err == nil || !strings.Contains(err.Error(), "force와 dry-run은 함께 사용할 수 없습니다") {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if called {
