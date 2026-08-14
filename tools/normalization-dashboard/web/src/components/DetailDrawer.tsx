@@ -6,7 +6,7 @@ import type { Declaration, DetailGroup, MatchingCandidate } from '../types'
 
 const matchingGroupTitles = new Set(['알코올 매칭', '증류소 매칭', '리전 매칭', '매칭 이력'])
 
-export function DetailDrawer({ declaration, onClose }: { declaration: Declaration | null; onClose: () => void }) {
+export function DetailDrawer({ declaration, onClose, onOpenImporter }: { declaration: Declaration | null; onClose: () => void; onOpenImporter?: (importerID: number, businessName: string) => void }) {
   const [emptyShown, setEmptyShown] = useState(false)
   if (!declaration) return null
   const groups = declaration.groups ?? []
@@ -26,6 +26,12 @@ export function DetailDrawer({ declaration, onClose }: { declaration: Declaratio
           <StatusChip status={declaration.status} />
           <label className="drawer__toggle"><input type="checkbox" checked={emptyShown} onChange={(event) => setEmptyShown(event.target.checked)} />값이 없는 항목도 보기</label>
         </div>
+        <section className={`drawer__importer-link${declaration.importer_linked ? ' is-linked' : ''}`} aria-label="정제 수입사 연결">
+          <div><span>원장 수입사</span><strong>{declaration.source_importer_name || declaration.importer_name || '원문 없음'}</strong></div>
+          {declaration.importer_linked && declaration.importer_id && declaration.importer_business_name
+            ? <><i aria-hidden="true">↔</i><div><span>정제 수입사</span><strong>{declaration.importer_business_name}</strong><small>ID {declaration.importer_id} · {declaration.importer_link_source === 'ADMIN' ? '관리자 확정' : '상호 exact 자동 연결'}</small></div><button type="button" onClick={() => onOpenImporter?.(declaration.importer_id!, declaration.importer_business_name!)}>수입사 모든 정보 보기</button></>
+            : <><i aria-hidden="true">—</i><div><span>정제 수입사</span><strong>연결되지 않음</strong><small>공식 업체 상호와 완전히 일치하지 않았습니다.</small></div></>}
+        </section>
 
         {reasons.length > 0 && <details className="drawer__reasons">
           <summary><Term>확인 사유</Term> {reasons.length}건</summary>

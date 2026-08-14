@@ -7,7 +7,9 @@ export interface Overview {
   review_required_count: number
   status_counts: Record<string, number>
   field_coverage: Record<string, number>
-  latest_processed_at?: string
+  latest_processed_at: string
+  ledger_preservation_rate: number
+  review_required_ratio: number
 }
 
 export interface Filters {
@@ -29,6 +31,11 @@ export interface Declaration {
   processed_at?: string
   item_name?: string
   importer_name?: string
+  source_importer_name?: string
+  importer_id?: number
+  importer_business_name?: string
+  importer_linked?: boolean
+  importer_link_source?: 'AUTO' | 'ADMIN' | string
   country?: string
   alcohol_matched?: boolean
   distillery_matched?: boolean
@@ -41,6 +48,7 @@ export interface Declaration {
 }
 
 export type MatchFilter = '' | 'matched' | 'unmatched'
+export type ImporterLinkFilter = '' | 'matched' | 'unlinked'
 export type DeclarationSort = 'processed_at' | 'alcohol' | 'distillery' | 'region'
 export type SortOrder = 'asc' | 'desc'
 
@@ -90,31 +98,30 @@ export interface DeclarationPage {
   total: number
   page: number
   page_size: number
+  total_pages: number
 }
 
-export interface Importer {
+export interface ImporterGroup {
+  importer_id: number
+  official_business_code: string
   license_no: string
   business_name: string
   representative_name: string
   permit_date: string
   institution_name: string
-  address: string
+  primary_address: string
   telephone: string
   industry_name: string
-  closure_status_name: string
-  closure_date: string
-  observed_at: string
-  source: string
-}
-
-export interface ImporterGroup {
-  business_name: string
-  license_count: number
-  address_count: number
-  institution_count: number
-  first_permit_date: string
-  observed_at: string
-  source: string
+  operating_status: string
+  source_detail_url: string
+  description: string
+  admin_status: string
+  source_observed_at: string
+  updated_at: string
+  declaration_count: number
+  product_count: number
+  first_import_date: string
+  last_import_date: string
 }
 
 export interface ImporterPage {
@@ -133,9 +140,37 @@ export interface ImporterStatistics {
 }
 
 export interface ImporterDetail {
+  importer_id: number
   business_name: string
-  licenses: Importer[]
+  profile: ImporterProfile
   statistics: ImporterStatistics
+}
+
+export interface ImporterProfile {
+  importer_id: number
+  official_business_code: string
+  license_no: string
+  business_name: string
+  business_name_key_sha256: string
+  representative_name: string
+  permit_date: string
+  institution_name: string
+  primary_address: string
+  telephone: string
+  industry_name: string
+  operating_status: string
+  source_list_url: string
+  source_detail_url: string
+  source_list_sha256: string
+  source_detail_sha256: string
+  source_observed_at: string
+  description: string
+  admin_note: string
+  admin_status: string
+  reviewed_by: string
+  reviewed_at: string
+  created_at: string
+  updated_at: string
 }
 
 export interface ImporterProductGroup {
@@ -164,6 +199,7 @@ export interface ImporterLedgerItem {
   country: string
   volume: string
   abv: string
+  link_source: string
 }
 
 export interface ImporterLedgerPage {
@@ -179,6 +215,52 @@ export interface ImporterQuery {
   page_size: number
   q?: string
   matched_only?: boolean
+  operating_status?: string
+  industry_name?: string
+  sort?: 'business_name' | 'declarations' | 'last_import' | 'observed_at'
+  order?: SortOrder
+}
+
+export interface MissingImporter {
+  missing_importer_id: number
+  source_importer_name: string
+  source_name_key_sha256: string
+  match_status: 'MISSING' | 'AMBIGUOUS' | string
+  candidate_count: number
+  candidates: Array<Record<string, unknown>>
+  declaration_count: number
+  sample_rcno: string
+  first_processed_date: string
+  last_processed_date: string
+  source_list_url: string
+  source_list_sha256: string
+  source_observed_at: string
+  description: string
+  admin_note: string
+  admin_status: 'OPEN' | 'RESOLVED' | 'DISMISSED' | string
+  resolved_importer_id: number
+  resolved_importer_business_name: string
+  resolution_source: string
+  reviewed_by: string
+  reviewed_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MissingImporterPage {
+  missing_importers: MissingImporter[]
+  page: number
+  page_size: number
+  total: number
+  total_pages: number
+}
+
+export interface MissingImporterQuery {
+  page: number
+  page_size: number
+  q?: string
+  match_status?: 'MISSING' | 'AMBIGUOUS'
+  admin_status?: 'OPEN' | 'RESOLVED' | 'DISMISSED'
 }
 
 export interface Quality {
@@ -206,6 +288,10 @@ export interface DeclarationQuery {
   importer?: string
   country?: string
   reason?: string
+  importer_link?: ImporterLinkFilter
+  importer_id?: number
+  from?: string
+  to?: string
   alcohol_match?: MatchFilter
   distillery_match?: MatchFilter
   region_match?: MatchFilter

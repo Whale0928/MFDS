@@ -1,37 +1,32 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useId, useState } from 'react'
 import { api } from '../api'
 import { number } from '../format'
-import type { Importer, ImporterDetail as ImporterDetailData, ImporterGroup, ImporterLedgerPage, ImporterPage, ImporterProductGroup, ImporterProductPage } from '../types'
+import type { ImporterDetail as ImporterDetailData, ImporterGroup, ImporterLedgerPage, ImporterPage, ImporterProductGroup, ImporterProductPage, ImporterProfile, MissingImporter, MissingImporterPage } from '../types'
 
 const PAGE_SIZE = 20
 const LEDGER_PAGE_SIZE = 10
 
-export function ImporterList() {
+export function ImporterList({ onOpenImporter }: { onOpenImporter: (importer: ImporterGroup) => void }) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [data, setData] = useState<ImporterPage | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [selectedBusinessName, setSelectedBusinessName] = useState<string | null>(null)
-  const [matchedOnly, setMatchedOnly] = useState(true)
+	const [error, setError] = useState<string | null>(null)
+	const [matchedOnly, setMatchedOnly] = useState(true)
+	const [operatingStatus, setOperatingStatus] = useState('')
+	const [industryName, setIndustryName] = useState('수입식품등 수입판매업')
+	const [sort, setSort] = useState<'business_name' | 'declarations' | 'last_import' | 'observed_at'>('business_name')
 
   useEffect(() => {
     let alive = true
     setLoading(true)
-    api.importers({ page, page_size: PAGE_SIZE, q: query || undefined, matched_only: matchedOnly })
+	api.importers({ page, page_size: PAGE_SIZE, q: query || undefined, matched_only: matchedOnly, operating_status: operatingStatus || undefined, industry_name: industryName || undefined, sort, order: sort === 'business_name' ? 'asc' : 'desc' })
       .then((result) => { if (alive) { setData(result); setError(null) } })
       .catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [page, query, matchedOnly])
-
-  useEffect(() => {
-    if (!selectedBusinessName) return
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setSelectedBusinessName(null) }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [selectedBusinessName])
+	}, [page, query, matchedOnly, operatingStatus, industryName, sort])
 
   const search = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -39,77 +34,184 @@ export function ImporterList() {
     setQuery(input.trim())
   }
   const totalPages = Math.max(1, data?.total_pages ?? 0)
+	const activeFilters = [query, operatingStatus, industryName !== '수입식품등 수입판매업' ? industryName : '', matchedOnly ? '' : 'all', sort !== 'business_name' ? sort : ''].filter(Boolean).length
+  const resetFilters = () => {
+    setInput('')
+    setQuery('')
+    setMatchedOnly(true)
+    setOperatingStatus('')
+		setIndustryName('수입식품등 수입판매업')
+    setSort('business_name')
+    setPage(1)
+  }
 
   return <div className="page importer-page">
     <div className="page-title importer-page__title">
       <div><p className="eyebrow">OFFICIAL IMPORTER REGISTER</p><h1>수입사 목록</h1></div>
-      <p>같은 상호로 등록된 인허가를 한 묶음으로 보고, 상호별 공식정보와 제품별 수입 원장을 확인합니다.</p>
+      <p>공식 화면에서 exact 단일 결과로 확정된 수입사와 제품별 수입 원장을 확인합니다.</p>
     </div>
     <section className="importer-register-note" aria-label="수입사 목록 기준">
-      <div><span>목록 기준</span><strong>동일 상호 하나당 한 줄</strong></div>
-      <p>앞뒤 공백을 제외한 상호가 완전히 같을 때만 묶습니다. 표기 변형이나 비슷한 이름은 별도 상호로 유지합니다.</p>
-      <span className="importer-source">C001(수입식품 영업신고 정보)</span>
+      <div><span>목록 기준</span><strong>공식 exact 단일 수입사 하나당 한 줄</strong></div>
+      <p>원장 상호와 앞뒤 공백을 제외한 공식 상호가 완전히 같고 후보가 한 건일 때만 확정합니다. 0건과 복수 후보는 미매칭 관리 목록으로 분리합니다.</p>
+		<span className="importer-source">수입식품정보마루 국내업소 공식 화면</span>
     </section>
     <form className="importer-search" onSubmit={search}>
-      <label htmlFor="importer-search">상호명 검색</label>
-      <div><input id="importer-search" value={input} onChange={(event) => setInput(event.target.value)} maxLength={200} placeholder="상호명" /><button type="submit">검색</button></div>
+      <div className="importer-search__query"><label htmlFor="importer-search">통합 검색</label><div><input id="importer-search" value={input} onChange={(event) => setInput(event.target.value)} maxLength={200} placeholder="상호 · 대표자 · 주소 · 전화" /><button type="submit">검색</button></div></div>
+		<label>영업 상태<select value={operatingStatus} onChange={(event) => { setOperatingStatus(event.target.value); setPage(1) }}><option value="">전체</option><option value="정상">정상</option><option value="UNKNOWN">공식 상세 미확인</option></select></label>
+      <label>업종<select value={industryName} onChange={(event) => { setIndustryName(event.target.value); setPage(1) }}><option value="">업종 전체</option><option value="수입식품등 수입판매업">수입식품등 수입판매업</option></select></label>
+		<label>정렬<select value={sort} onChange={(event) => { setSort(event.target.value as typeof sort); setPage(1) }}><option value="business_name">상호명순</option><option value="declarations">수입 기록 많은 순</option><option value="last_import">최근 수입순</option><option value="observed_at">최근 관측순</option></select></label>
       <label className="importer-match-filter"><input type="checkbox" checked={matchedOnly} onChange={(event) => { setMatchedOnly(event.target.checked); setPage(1) }} /><span><strong>수입 원장과 매칭되는 상호만</strong><small>상호명이 완전히 같은 수입 기록이 있는 경우</small></span></label>
+      <button className="filter-reset" type="button" onClick={resetFilters}>기본 조건으로 초기화 ({activeFilters})</button>
       <span aria-live="polite">{number(data?.total)}개 상호</span>
     </form>
     {loading && <div className="state state--loading" role="status"><span />수입사 목록을 읽는 중</div>}
     {error && <div className="state state--error" role="alert"><b>수입사 목록을 조회할 수 없습니다.</b><span>{error}</span></div>}
     {!loading && !error && data && <>
-      <ImporterRegister importers={data.importers} onOpen={setSelectedBusinessName} />
+      <ImporterRegister importers={data.importers} matchedOnly={matchedOnly} onShowAll={() => { setMatchedOnly(false); setPage(1) }} onOpen={onOpenImporter} />
       <div className="pagination"><button disabled={page <= 1} onClick={() => setPage(page - 1)}>이전</button><span>{page} / {totalPages}</span><button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>다음</button></div>
     </>}
-    {selectedBusinessName && <ImporterDetailDialog businessName={selectedBusinessName} onClose={() => setSelectedBusinessName(null)} />}
   </div>
 }
 
-function ImporterRegister({ importers, onOpen }: { importers: ImporterGroup[]; onOpen: (businessName: string) => void }) {
-  if (!importers.length) return <div className="empty-state"><h2>조건에 맞는 수입사가 없습니다.</h2><p>다른 상호명으로 검색하세요.</p></div>
+export function MissingImporterQueue() {
+  const [input, setInput] = useState('')
+  const [query, setQuery] = useState('')
+  const [matchStatus, setMatchStatus] = useState<'' | 'MISSING' | 'AMBIGUOUS'>('')
+  const [adminStatus, setAdminStatus] = useState<'OPEN' | 'RESOLVED' | 'DISMISSED'>('OPEN')
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<MissingImporterPage | null>(null)
+  const [selected, setSelected] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api.missingImporters({ page, page_size: PAGE_SIZE, q: query || undefined, match_status: matchStatus || undefined, admin_status: adminStatus })
+      .then((result) => { if (alive) { setData(result); setError(null) } })
+      .catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [page, query, matchStatus, adminStatus])
+
+  const search = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); setPage(1); setQuery(input.trim()) }
+  const totalPages = Math.max(1, data?.total_pages ?? 0)
+  return <div className="page importer-page missing-importer-page">
+    <div className="page-title importer-page__title"><div><p className="eyebrow">ADMIN REVIEW QUEUE · READ ONLY</p><h1>미매칭 수입사</h1></div><p>공식 exact 후보가 없거나 여러 개인 원장 상호를 관리자 관리 대상으로 확인합니다. 이 화면에서는 값을 바꾸지 않습니다.</p></div>
+    <section className="missing-queue-note" aria-label="미매칭 수입사 안내"><strong>관리자 관리 대상</strong><span>MISSING · 공식 exact 후보 0건</span><span>AMBIGUOUS · 공식 exact 후보 복수</span><small>후보, 원장 통계, 설명과 관리 필드는 모두 읽기 전용입니다.</small></section>
+    <form className="importer-search missing-importer-search" onSubmit={search}>
+      <div className="importer-search__query"><label htmlFor="missing-importer-search">상호 검색</label><div><input id="missing-importer-search" value={input} onChange={(event) => setInput(event.target.value)} maxLength={200} placeholder="원장 상호 · RCNO · 설명" /><button type="submit">검색</button></div></div>
+      <label>매칭 상태<select value={matchStatus} onChange={(event) => { setMatchStatus(event.target.value as typeof matchStatus); setPage(1) }}><option value="">전체</option><option value="MISSING">MISSING</option><option value="AMBIGUOUS">AMBIGUOUS</option></select></label>
+      <label>관리 상태<select value={adminStatus} onChange={(event) => { setAdminStatus(event.target.value as typeof adminStatus); setPage(1) }}><option value="OPEN">OPEN</option><option value="RESOLVED">RESOLVED</option><option value="DISMISSED">DISMISSED</option></select></label>
+      <span aria-live="polite">{number(data?.total)}건</span>
+    </form>
+    {loading && <div className="state state--loading" role="status"><span />관리 대상 목록을 읽는 중</div>}
+    {error && <div className="state state--error" role="alert"><b>미매칭 수입사 목록을 조회할 수 없습니다.</b><span>{error}</span></div>}
+    {!loading && !error && data && <>
+      {data.missing_importers.length ? <section className="missing-importer-register" aria-label="미매칭 수입사 관리 대상 목록">
+        <div className="missing-importer-register__head"><span>원장 상호</span><span>판정</span><span>원장 통계</span><span>설명 · 관리</span><span>상세</span></div>
+        {data.missing_importers.map((item) => <button type="button" className="missing-importer-record" key={item.missing_importer_id} onClick={() => setSelected(item.missing_importer_id)}>
+          <span data-label="원장 상호"><strong>{item.source_importer_name}</strong><small>관리 대상 ID {item.missing_importer_id}</small></span>
+          <span data-label="판정"><StatusLabel value={item.match_status} /><small>{number(item.candidate_count)}개 후보</small></span>
+          <span data-label="원장 통계"><b>{number(item.declaration_count)}건</b><small>{item.first_processed_date || '—'} — {item.last_processed_date || '—'}</small><small>예시 {value(item.sample_rcno)}</small></span>
+          <span data-label="설명 · 관리"><b>{value(item.admin_status)}</b><small>{value(item.description)}</small><small>{value(item.admin_note)}</small></span>
+          <span className="importer-record__open" data-label="상세">후보 · 필드 보기 →</span>
+        </button>)}
+      </section> : <div className="empty-state"><h2>조건에 맞는 관리 대상이 없습니다.</h2><p>상호 검색 또는 상태 필터를 바꿔 다시 확인하세요.</p></div>}
+      <div className="pagination"><button disabled={page <= 1} onClick={() => setPage(page - 1)}>이전</button><span>{page} / {totalPages}</span><button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>다음</button></div>
+    </>}
+    {selected !== null && <MissingImporterDetailDrawer missingImporterID={selected} onClose={() => setSelected(null)} />}
+  </div>
+}
+
+function MissingImporterDetailDrawer({ missingImporterID, onClose }: { missingImporterID: number; onClose: () => void }) {
+  const titleID = useId()
+  const [data, setData] = useState<MissingImporter | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    api.missingImporter(missingImporterID).then((result) => { if (alive) { setData(result); setError(null) } }).catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
+    return () => { alive = false }
+  }, [missingImporterID])
+  useEffect(() => { const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }; window.addEventListener('keydown', closeOnEscape); return () => window.removeEventListener('keydown', closeOnEscape) }, [onClose])
+  return <div className="missing-detail-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <aside className="missing-detail-drawer" role="dialog" aria-modal="true" aria-labelledby={titleID}>
+      <header><div><p className="eyebrow">ADMIN REVIEW QUEUE · READ ONLY</p><h2 id={titleID}>{data?.source_importer_name || '미매칭 수입사 상세'}</h2><span>관리자가 확인할 수 있지만 이 화면에서는 수정할 수 없습니다.</span></div><button type="button" onClick={onClose}>닫기</button></header>
+      {error && <div className="state state--error" role="alert"><b>상세를 조회할 수 없습니다.</b><span>{error}</span></div>}
+      {!data && !error && <div className="state state--loading" role="status"><span />관리 대상 상세를 읽는 중</div>}
+      {data && <div className="missing-detail-drawer__body">
+        <div className="missing-detail-status"><StatusLabel value={data.match_status} /><StatusLabel value={data.admin_status} /><span>{number(data.candidate_count)}개 후보 · {number(data.declaration_count)}건 원장</span></div>
+        <section><h3>후보</h3>{data.candidates.length ? <div className="missing-candidate-list">{data.candidates.map((candidate, index) => <article key={index}><strong>후보 {index + 1}</strong><dl>{candidateFields(candidate).map(([label, candidateValue]) => <div key={label}><dt>{label}</dt><dd>{candidateValue}</dd></div>)}</dl></article>)}</div> : <p className="empty-inline">공식 exact 후보가 없습니다.</p>}</section>
+        <section><h3>원장 통계</h3><dl className="missing-detail-fields"><div><dt>원장 건수</dt><dd>{number(data.declaration_count)}건</dd></div><div><dt>예시 RCNO</dt><dd>{value(data.sample_rcno)}</dd></div><div><dt>최초 처리일</dt><dd>{value(data.first_processed_date)}</dd></div><div><dt>최근 처리일</dt><dd>{value(data.last_processed_date)}</dd></div></dl></section>
+        <section><h3>설명과 관리 필드 · 읽기 전용</h3><dl className="missing-detail-fields"><div><dt>설명</dt><dd>{officialValue(data.description)}</dd></div><div><dt>관리자 메모</dt><dd>{officialValue(data.admin_note)}</dd></div><div><dt>관리 상태</dt><dd>{data.admin_status}</dd></div><div><dt>해결 수입사</dt><dd>{data.resolved_importer_business_name || (data.resolved_importer_id ? `ID ${data.resolved_importer_id}` : '미해결')}</dd></div><div><dt>해결 출처</dt><dd>{officialValue(data.resolution_source)}</dd></div><div><dt>검토자 · 시각</dt><dd>{[data.reviewed_by, displayObservedAt(data.reviewed_at)].filter(Boolean).join(' · ') || '미검토'}</dd></div></dl></section>
+        <section><h3>공식 관측</h3><dl className="missing-detail-fields"><div><dt>상호 exact key SHA-256</dt><dd>{officialValue(data.source_name_key_sha256)}</dd></div><div><dt>목록 URL</dt><dd>{officialValue(data.source_list_url)}</dd></div><div><dt>목록 SHA-256</dt><dd>{officialValue(data.source_list_sha256)}</dd></div><div><dt>관측 시각</dt><dd>{officialValue(displayObservedAt(data.source_observed_at))}</dd></div></dl></section>
+      </div>}
+    </aside>
+  </div>
+}
+
+function StatusLabel({ value: status }: { value: string }) { return <strong className={`missing-status missing-status--${status.toLowerCase()}`}>{status}</strong> }
+function candidateFields(candidate: Record<string, unknown>) {
+  const fields: Array<[string, string]> = [['업소 코드', candidateText(candidate, 'InternalBusinessCode', 'internal_business_code')], ['인허가번호', candidateText(candidate, 'LicenseNumber', 'license_number')], ['상호', candidateText(candidate, 'BusinessName', 'business_name')], ['대표자', candidateText(candidate, 'Representative', 'representative')], ['주소', candidateText(candidate, 'Address', 'address')], ['업종', candidateText(candidate, 'Industry', 'industry')], ['관할기관', candidateText(candidate, 'Institution', 'institution')], ['상세 URL', candidateText(candidate, 'DetailURL', 'detail_url')]]
+  return fields.filter(([, fieldValue]) => fieldValue)
+}
+function candidateText(candidate: Record<string, unknown>, ...keys: string[]) { for (const key of keys) { if (typeof candidate[key] === 'string' && candidate[key]) return candidate[key] as string }; return '' }
+
+function ImporterRegister({ importers, matchedOnly, onShowAll, onOpen }: { importers: ImporterGroup[]; matchedOnly: boolean; onShowAll: () => void; onOpen: (importer: ImporterGroup) => void }) {
+  if (!importers.length) return <div className="empty-state"><h2>조건에 맞는 수입사가 없습니다.</h2><p>{matchedOnly ? '아직 원장 연결이 없거나 다른 필터 조건에 해당하지 않습니다.' : '검색어 또는 필터 조건을 바꿔 다시 확인하세요.'}</p>{matchedOnly && <button type="button" onClick={onShowAll}>원장 미연결 수입사도 보기</button>}</div>
   return <section className="importer-register" aria-label="상호별 수입사 목록">
-    <div className="importer-register__header"><span>상호명</span><span>인허가</span><span>소재지</span><span>관할기관</span><span>최초 허가일</span><span>상세</span></div>
-    {importers.map((importer) => <button type="button" className="importer-record" key={importer.business_name} onClick={() => onOpen(importer.business_name)} aria-label={`${importer.business_name} 상호 상세 열기`}>
-      <span className="importer-record__identity" data-label="상호명"><strong>{importer.business_name}</strong><small>동일 상호 기준</small></span>
-      <span data-label="인허가"><b>{number(importer.license_count)}</b>건</span>
-      <span data-label="소재지"><b>{number(importer.address_count)}</b>곳</span>
-      <span data-label="관할기관"><b>{number(importer.institution_count)}</b>곳</span>
-      <span data-label="최초 허가일">{value(importer.first_permit_date)}</span>
+    <div className="importer-register__header"><span>정제 수입사</span><span>공식 프로필</span><span>수입 원장</span><span>관리 상태</span><span>상세</span></div>
+    {importers.map((importer) => <button type="button" className="importer-record" key={importer.importer_id} onClick={() => onOpen(importer)} aria-label={`${importer.business_name} 상호 상세 열기`}>
+      <span className="importer-record__identity" data-label="정제 수입사"><strong>{importer.business_name}</strong><small>ID {importer.importer_id} · {statusLabel(importer.operating_status)}</small><em>{value(importer.industry_name)}</em></span>
+      <span className="importer-record__profile" data-label="공식 프로필"><b>{value(importer.representative_name)}</b><small>{value(importer.primary_address)}</small><small>{value(importer.telephone)}</small><small>인허가 {value(importer.license_no)}</small></span>
+      <span data-label="수입 원장"><b>{number(importer.declaration_count)}</b>건<small>제품 {number(importer.product_count)}종</small><small>{dateRange(importer.first_import_date, importer.last_import_date)}</small></span>
+      <span data-label="관리 상태"><b>{value(importer.admin_status)}</b><small>{value(importer.description)}</small><small>관측 {displayObservedAt(importer.source_observed_at)}</small></span>
       <span className="importer-record__open" data-label="상세">정보 · 원장 보기</span>
     </button>)}
   </section>
 }
 
-function ImporterDetailDialog({ businessName, onClose }: { businessName: string; onClose: () => void }) {
+export function ImporterDetailDialog({ importer, active = true, onClose, onOpenDeclaration }: { importer: Pick<ImporterGroup, 'importer_id' | 'business_name'>; active?: boolean; onClose: () => void; onOpenDeclaration: (rcno: string) => void }) {
   const [data, setData] = useState<ImporterDetailData | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
-    api.importer(businessName)
+    api.importer(importer.importer_id)
       .then((result) => { if (alive) { setData(result); setError(null) } })
       .catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
     return () => { alive = false }
-  }, [businessName])
+  }, [importer.importer_id])
+
+  useEffect(() => {
+    if (!active) return
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [active, onClose])
 
   return <div className="importer-detail-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <aside className="importer-detail-modal" role="dialog" aria-modal="true" aria-labelledby="importer-detail-title">
-      <header className="importer-detail-modal__head"><div><p>IMPORTER DOSSIER · EXACT TRADE NAME</p><h1 id="importer-detail-title">{businessName}</h1><span>법인 식별자가 아닌 원장 상호의 완전 일치 기준입니다.</span></div><button type="button" onClick={onClose} aria-label="수입사 상세 닫기">닫기</button></header>
+      <header className="importer-detail-modal__head"><div><p>IMPORTER DOSSIER · EXACT TRADE NAME</p><h1 id="importer-detail-title">{importer.business_name}</h1><span>정제 수입사 ID {importer.importer_id} · 원장 상호 완전 일치 기준</span></div><button type="button" onClick={onClose} aria-label="수입사 상세 닫기">닫기</button></header>
       <div className="importer-profile">
         {!data && !error && <div className="state state--loading" role="status"><span />상호 정보와 수입 현황을 읽는 중</div>}
         {error && <div className="state state--error" role="alert"><b>수입사 상세를 조회할 수 없습니다.</b><span>{error}</span><button type="button" onClick={onClose}>닫기</button></div>}
         {data && <>
-          <section className="importer-profile__section" aria-labelledby="importer-license-title">
-            <SectionHeading number="1" title="상호의 모든 정보" description={`현재 확인되는 인허가 ${number(data.licenses.length)}건을 빠짐없이 표시합니다.`} id="importer-license-title" />
-            <div className="importer-license-grid">{data.licenses.map((license) => <LicenseCard key={license.license_no} license={license} />)}</div>
+          <ImporterDetailAccessNote profile={data.profile} />
+          <section className="importer-profile__section" aria-labelledby="importer-profile-title">
+			<SectionHeading number="1" title="정제 수입사 프로필" description="공식 국내업소 화면에서 exact 단일 결과로 확정한 기준정보입니다." id="importer-profile-title" />
+            <ImporterProfileSummary profile={data.profile} />
+          </section>
+          <section className="importer-profile__section" aria-labelledby="importer-official-title">
+            <SectionHeading number="2" title="공식 필드와 관리 필드" description="최신 2테이블 계약이 제공하는 공식 값과 내부 관리 값을 모두 읽기 전용으로 표시합니다." id="importer-official-title" />
+            <ImporterOfficialProfile profile={data.profile} />
           </section>
           <section className="importer-profile__section" aria-labelledby="importer-stat-title">
-            <SectionHeading number="2" title="수입 현황" description="제품별 원장을 읽기 전에 필요한 규모와 확인 기간만 표시합니다." id="importer-stat-title" />
+            <SectionHeading number="3" title="수입 현황" description="연결된 정제 원장의 규모와 확인 기간입니다." id="importer-stat-title" />
             <Statistics statistics={data.statistics} />
           </section>
           <section className="importer-profile__section" aria-labelledby="importer-ledger-title">
-            <SectionHeading number="3" title="제품별 수입 원장" description="수입사 원문명이 이 상호와 정확히 같은 기록을 제품명별 폴더로 묶었습니다. 폴더를 펼치면 원장 10건씩 확인할 수 있습니다." id="importer-ledger-title" />
-            <ImporterProductFolders businessName={businessName} />
+            <SectionHeading number="4" title="제품별 수입 원장" description="저장된 수입사 연결 ID가 같은 기록을 제품명별 폴더로 묶었습니다. 원장을 누르면 신고 상세를 확인할 수 있습니다." id="importer-ledger-title" />
+            <ImporterProductFolders importerID={importer.importer_id} onOpenDeclaration={onOpenDeclaration} />
           </section>
         </>}
       </div>
@@ -121,13 +223,26 @@ function SectionHeading({ number: sectionNumber, title, description, id }: { num
   return <header className="importer-section-head"><span>{sectionNumber}</span><div><h2 id={id}>{title}</h2><p>{description}</p></div></header>
 }
 
-function LicenseCard({ license }: { license: Importer }) {
-  const fields = [['대표자', license.representative_name], ['업종', license.industry_name], ['허가일', license.permit_date], ['관할기관', license.institution_name], ['소재지', license.address], ['전화번호', license.telephone], ['폐업 상태', license.closure_status_name], ['폐업일', license.closure_date], ['마지막 수집', displayObservedAt(license.observed_at)], ['출처', license.source]]
-  return <article className="importer-license-card">
-    <header><div><span>인허가번호</span><code>{license.license_no}</code></div><strong className={license.closure_status_name ? 'is-closed' : ''}>{license.closure_status_name || '폐업정보 없음'}</strong></header>
-    <dl>{fields.map(([label, fieldValue]) => <div key={label}><dt>{label}</dt><dd>{value(fieldValue)}</dd></div>)}</dl>
-    {!license.closure_status_name && <p>폐업정보가 없다는 뜻이며 현재 영업 중임을 확정하지 않습니다.</p>}
-  </article>
+function ImporterDetailAccessNote({ profile }: { profile: ImporterProfile }) {
+  const restricted = !profile.source_detail_url
+  return <section className={`importer-detail-access-note${restricted ? '' : ' is-available'}`} aria-label="공식 상세 접근 상태">
+    <strong>{restricted ? '공식 상세 접근 제한 · HTTP 302' : '공식 상세 연결 확인'}</strong>
+    <p>{restricted ? '공식 상세 화면으로 확인할 수 없는 값은 추정하지 않고 미제공으로 표시합니다.' : '공식 상세 URL이 저장되어도 응답에 없는 값은 추정하지 않고 미제공으로 표시합니다.'} 사업자등록번호, 법인 식별자와 상세 HTML은 이 계약에서 제공되지 않습니다.</p>
+  </section>
+}
+
+function ImporterProfileSummary({ profile }: { profile: ImporterProfile }) {
+  const fields = [['정제 수입사 ID', String(profile.importer_id)], ['상호', profile.business_name], ['대표자', profile.representative_name], ['대표 주소', profile.primary_address], ['전화번호', profile.telephone], ['업종', profile.industry_name], ['영업 상태', statusLabel(profile.operating_status)], ['인허가번호', profile.license_no], ['인허가일', profile.permit_date], ['관할기관', profile.institution_name]]
+	return <div className="importer-master-profile"><dl>{fields.map(([label, fieldValue]) => <div key={label}><dt>{label}</dt><dd>{officialValue(fieldValue)}</dd></div>)}</dl><p>영업 상태는 공식 상세 화면에서 확인된 경우에만 표시하며, 접근 제한 건은 추정하지 않습니다.</p></div>
+}
+
+function ImporterOfficialProfile({ profile }: { profile: ImporterProfile }) {
+  const officialFields = [['내부 업소 코드', profile.official_business_code], ['상호 exact key SHA-256', profile.business_name_key_sha256], ['목록 조회 URL', profile.source_list_url], ['상세 조회 URL', profile.source_detail_url], ['목록 관측 시각', displayObservedAt(profile.source_observed_at)], ['목록 SHA-256', profile.source_list_sha256], ['상세 SHA-256', profile.source_detail_sha256]]
+  const adminFields = [['설명', profile.description], ['관리자 메모', profile.admin_note], ['관리 상태', profile.admin_status], ['마지막 검토자', profile.reviewed_by], ['마지막 검토 시각', displayObservedAt(profile.reviewed_at)], ['생성 시각', displayObservedAt(profile.created_at)], ['수정 시각', displayObservedAt(profile.updated_at)]]
+  return <div className="importer-official-profile">
+    <div><h3>공식 출처와 관측</h3><dl>{officialFields.map(([label, fieldValue]) => <div key={label}><dt>{label}</dt><dd>{officialValue(fieldValue)}</dd></div>)}</dl></div>
+    <div><h3>내부 관리 필드 · 읽기 전용</h3><dl>{adminFields.map(([label, fieldValue]) => <div key={label}><dt>{label}</dt><dd>{officialValue(fieldValue)}</dd></div>)}</dl></div>
+  </div>
 }
 
 function Statistics({ statistics }: { statistics: ImporterDetailData['statistics'] }) {
@@ -135,7 +250,7 @@ function Statistics({ statistics }: { statistics: ImporterDetailData['statistics
   return <div className="importer-stat-ledger importer-stat-ledger--compact">{summary.map(([label, count, unit]) => <div key={label}><span>{label}</span><strong>{number(Number(count))}</strong><small>{unit}</small></div>)}<div className="importer-stat-ledger__period"><span>확인 기간</span><strong>{statistics.first_import_date && statistics.last_import_date ? `${statistics.first_import_date} — ${statistics.last_import_date}` : '일치하는 수입 기록 없음'}</strong></div></div>
 }
 
-function ImporterProductFolders({ businessName }: { businessName: string }) {
+function ImporterProductFolders({ importerID, onOpenDeclaration }: { importerID: number; onOpenDeclaration: (rcno: string) => void }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState<ImporterProductPage | null>(null)
   const [loading, setLoading] = useState(true)
@@ -144,12 +259,12 @@ function ImporterProductFolders({ businessName }: { businessName: string }) {
   useEffect(() => {
     let alive = true
     setLoading(true)
-    api.importerProducts(businessName, page, PAGE_SIZE)
+    api.importerProducts(importerID, page, PAGE_SIZE)
       .then((result) => { if (alive) { setData(result); setError(null) } })
       .catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [businessName, page])
+  }, [importerID, page])
 
   if (loading) return <div className="state state--loading importer-folders-state" role="status"><span />제품 폴더를 읽는 중</div>
   if (error) return <div className="state state--error importer-folders-state" role="alert"><b>제품별 원장을 조회할 수 없습니다.</b><span>{error}</span></div>
@@ -158,12 +273,12 @@ function ImporterProductFolders({ businessName }: { businessName: string }) {
   const totalPages = Math.max(1, data.total_pages)
   return <div className="importer-product-folders">
     <div className="importer-product-folders__summary"><strong>{number(data.total)}개 제품</strong><span>최근 수입 기록이 있는 제품부터 표시</span></div>
-    <div className="importer-product-folders__list">{data.products.map((product) => <ImporterProductFolder key={product.product_key} businessName={businessName} product={product} />)}</div>
+    <div className="importer-product-folders__list">{data.products.map((product) => <ImporterProductFolder key={product.product_key} importerID={importerID} product={product} onOpenDeclaration={onOpenDeclaration} />)}</div>
     <div className="pagination importer-product-pagination"><button type="button" disabled={page <= 1} onClick={() => setPage(page - 1)}>이전 제품</button><span>{page} / {totalPages}</span><button type="button" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>다음 제품</button></div>
   </div>
 }
 
-function ImporterProductFolder({ businessName, product }: { businessName: string; product: ImporterProductGroup }) {
+function ImporterProductFolder({ importerID, product, onOpenDeclaration }: { importerID: number; product: ImporterProductGroup; onOpenDeclaration: (rcno: string) => void }) {
   const [open, setOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [data, setData] = useState<ImporterLedgerPage | null>(null)
@@ -175,12 +290,12 @@ function ImporterProductFolder({ businessName, product }: { businessName: string
     if (!open) return
     let alive = true
     setLoading(true)
-    api.importerProductDeclarations(businessName, product.product_key, page, LEDGER_PAGE_SIZE)
+    api.importerProductDeclarations(importerID, product.product_key, page, LEDGER_PAGE_SIZE)
       .then((result) => { if (alive) { setData(result); setError(null) } })
       .catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [businessName, open, page, product.product_key])
+  }, [importerID, open, page, product.product_key])
 
   return <article className={`importer-product-folder${open ? ' is-open' : ''}`}>
     <button type="button" className="importer-product-folder__toggle" aria-expanded={open} aria-controls={panelID} onClick={() => setOpen(!open)}>
@@ -191,31 +306,33 @@ function ImporterProductFolder({ businessName, product }: { businessName: string
     {open && <div className="importer-product-folder__content" id={panelID}>
       {loading && <div className="state state--loading importer-ledger-state" role="status"><span />수입 원장을 읽는 중</div>}
       {error && <div className="state state--error importer-ledger-state" role="alert"><b>수입 원장을 조회할 수 없습니다.</b><span>{error}</span></div>}
-      {!loading && !error && data && <ProductLedgerRows data={data} page={page} onPage={setPage} />}
+      {!loading && !error && data && <ProductLedgerRows data={data} page={page} onPage={setPage} onOpenDeclaration={onOpenDeclaration} />}
     </div>}
   </article>
 }
 
-function ProductLedgerRows({ data, page, onPage }: { data: ImporterLedgerPage; page: number; onPage: (page: number) => void }) {
+function ProductLedgerRows({ data, page, onPage, onOpenDeclaration }: { data: ImporterLedgerPage; page: number; onPage: (page: number) => void; onOpenDeclaration: (rcno: string) => void }) {
   const totalPages = Math.max(1, data.total_pages)
   if (data.declarations.length === 0) return <p className="empty-inline">이 제품 폴더에 표시할 수입 원장이 없습니다.</p>
   return <>
-    <div className="importer-ledger-table" role="table" aria-label="제품별 수입 원장">
-      <div className="importer-ledger-table__head" role="row"><span>처리일</span><span>수입신고번호</span><span>원장 제품명</span><span>품목</span><span>해외 제조업소</span><span>제조국</span></div>
-      {data.declarations.map((item) => <div className="importer-ledger-row" role="row" key={`${item.rcno}-${item.processed_at}`}>
-        <span role="cell" data-label="처리일">{value(item.processed_at)}</span>
-        <code role="cell" data-label="수입신고번호">{item.rcno}</code>
-        <span className="importer-ledger-row__product" role="cell" data-label="원장 제품명"><strong>{value(item.source_name)}</strong>{item.source_name_english && item.source_name_english !== item.source_name && <small>{item.source_name_english}</small>}<small>{[item.volume, item.abv].filter(Boolean).join(' · ')}</small></span>
-        <span role="cell" data-label="품목">{value(item.item_name)}</span>
-        <span role="cell" data-label="해외 제조업소">{value(item.manufacturer_name)}</span>
-        <span role="cell" data-label="제조국">{value(item.country)}</span>
-      </div>)}
+    <div className="importer-ledger-table" aria-label="제품별 수입 원장">
+      <div className="importer-ledger-table__head"><span>처리일</span><span>수입신고번호</span><span>원장 제품명</span><span>품목</span><span>해외 제조업소</span><span>제조국</span></div>
+      {data.declarations.map((item) => <button type="button" className="importer-ledger-row" key={`${item.rcno}-${item.processed_at}`} onClick={() => onOpenDeclaration(item.rcno)} aria-label={`${item.source_name} 수입 원장 상세 열기`}>
+        <span data-label="처리일">{value(item.processed_at)}</span>
+        <code data-label="수입신고번호">{item.rcno}</code>
+        <span className="importer-ledger-row__product" data-label="원장 제품명"><strong>{value(item.source_name)}</strong>{item.source_name_english && item.source_name_english !== item.source_name && <small>{item.source_name_english}</small>}<small>{[item.volume, item.abv].filter(Boolean).join(' · ')}</small></span>
+        <span data-label="품목">{value(item.item_name)}</span>
+        <span data-label="해외 제조업소">{value(item.manufacturer_name)}</span>
+        <span data-label="제조국">{value(item.country)}</span>
+      </button>)}
     </div>
     <div className="pagination importer-ledger-pagination"><button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>이전 원장</button><span>{page} / {totalPages} · 총 {number(data.total)}건</span><button type="button" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>다음 원장</button></div>
   </>
 }
 
 function value(text: string) { return text || '—' }
+function officialValue(text: string) { return text || '미제공' }
 function dateRange(first: string, last: string) { return first && last ? `${first} — ${last}` : '처리일 미확인' }
 function displayObservedAt(text: string) { return text ? text.replace('T', ' ') : '' }
+function statusLabel(status: string) { return status === 'UNKNOWN' || !status ? '공식 상세 미확인' : status }
 function errorMessage(reason: unknown) { return reason instanceof Error ? reason.message : '수입사 정보를 불러오지 못했습니다.' }
