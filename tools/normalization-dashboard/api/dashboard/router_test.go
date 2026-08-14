@@ -14,11 +14,13 @@ import (
 
 type fakeQueryer struct {
 	queries []string
+	args    [][]any
 	respond func(string, []any) (RowIterator, error)
 }
 
 func (f *fakeQueryer) QueryContext(_ context.Context, query string, args ...any) (RowIterator, error) {
 	f.queries = append(f.queries, query)
+	f.args = append(f.args, args)
 	return f.respond(query, args)
 }
 
@@ -46,93 +48,42 @@ func (r *fakeRows) Scan(dest ...any) error {
 		return fmt.Errorf("column count: got %d want %d", len(row), len(dest))
 	}
 	for i := range dest {
-		reflect.ValueOf(dest[i]).Elem().Set(reflect.ValueOf(row[i]))
+		destination := reflect.ValueOf(dest[i])
+		if destination.Kind() != reflect.Pointer || destination.IsNil() {
+			return fmt.Errorf("destination %d is not a pointer", i)
+		}
+		value := reflect.ValueOf(row[i])
+		if !value.IsValid() {
+			return fmt.Errorf("nil value at column %d", i)
+		}
+		if value.Type().AssignableTo(destination.Elem().Type()) {
+			destination.Elem().Set(value)
+			continue
+		}
+		return fmt.Errorf("column %d: %T cannot scan into %T", i, row[i], dest[i])
 	}
 	return nil
 }
 
-func TestOverview_terminalStatusesAreNormalized(t *testing.T) {
-	queryer := &fakeQueryer{respond: func(query string, _ []any) (RowIterator, error) {
-		switch {
-		case strings.Contains(query, "MAX(source_processed_date)"):
-			return &fakeRows{values: [][]any{{int64(11924), int64(9780), int64(11924), "2026-08-05"}}}, nil
-		case strings.Contains(query, "GROUP BY normalization_status"):
-			return &fakeRows{values: [][]any{{"NORMALIZED", int64(2144)}, {"PARTIAL", int64(3)}, {"REVIEW_REQUIRED", int64(9775)}, {"UNPARSED", int64(2)}}}, nil
-		case strings.Contains(query, "field_name"):
-			return &fakeRows{values: [][]any{{"abv", int64(100), int64(200)}}}, nil
-		default:
-			return nil, fmt.Errorf("unexpected query: %s", query)
-		}
-	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
-	response := httptest.NewRecorder()
-	NewServer(queryer).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
-	}
-	var body overviewResponse
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	if body.TotalRCNO != 11924 || body.NormalizedCount != 11924 || body.ReviewRequiredCount != 9775 {
-		t.Fatalf("unexpected overview: %#v", body)
-	}
-	if body.FieldCoverage["abv"] != 50 {
-		t.Fatalf("coverage = %#v", body.FieldCoverage)
-	}
-}
-
-func TestDeclarations_usesReadOnlyPaginationAndSnakeCase(t *testing.T) {
-	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
-		switch {
-		case strings.HasPrefix(query, "SELECT COUNT(*)"):
-			if len(args) != 4 {
-				return nil, fmt.Errorf("count args = %d", len(args))
-			}
-			return &fakeRows{values: [][]any{{int64(1)}}}, nil
-		case strings.Contains(query, "FROM mfds_declaration_details"):
-			if len(args) != 6 {
-				return nil, fmt.Errorf("list args = %d", len(args))
-			}
-			return &fakeRows{values: [][]any{{"202600000001", "원본명", "정제명", "700 · 40%", "12년", "", "NORMALIZED", "2026-08-01", "위스키", "수입사", "영국", true, false, true, `["AMBIGUOUS"]`}}}, nil
-		default:
-			return nil, fmt.Errorf("unexpected query")
-		}
-	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/declarations?search=%EC%9B%90%EB%B3%B8&status=NORMALIZED&page=2&page_size=20", nil)
-	response := httptest.NewRecorder()
-	NewServer(queryer).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
-	}
-	if !strings.Contains(response.Body.String(), `"declarations"`) || !strings.Contains(response.Body.String(), `"source_name"`) || strings.Contains(response.Body.String(), `"internal_path"`) {
-		t.Fatalf("unexpected public response: %s", response.Body.String())
-	}
-	if !strings.Contains(response.Body.String(), `"alcohol_matched":true`) || !strings.Contains(response.Body.String(), `"distillery_matched":false`) || !strings.Contains(response.Body.String(), `"region_matched":true`) {
-		t.Fatalf("matching flags are missing: %s", response.Body.String())
-	}
-}
-
-func TestImporters_동일상호를묶어페이지로응답한다(t *testing.T) {
+func TestImporters_usesImporterAndDeclarationRelationsOnly(t *testing.T) {
 	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
 		switch {
 		case strings.Contains(query, "SELECT COUNT(*) FROM grouped_importers"):
-			if len(args) != 1 {
-				return nil, fmt.Errorf("count args = %d", len(args))
+			if len(args) != 1 || args[0] != "CLOSED" {
+				return nil, fmt.Errorf("unexpected count args: %#v", args)
 			}
 			return &fakeRows{values: [][]any{{int64(1)}}}, nil
-		case strings.Contains(query, "SELECT g.business_name"):
-			if len(args) != 3 {
-				return nil, fmt.Errorf("list args = %d", len(args))
+		case strings.Contains(query, "SELECT g.importer_id"):
+			if len(args) != 3 || args[0] != "CLOSED" || args[1] != 20 || args[2] != 20 {
+				return nil, fmt.Errorf("unexpected list args: %#v", args)
 			}
-			return &fakeRows{values: [][]any{{"수입사", int64(3), int64(2), int64(2), "2021-01-02", "2026-08-12T20:43:35"}}}, nil
+			return &fakeRows{values: [][]any{{int64(7), "BIZ-7", "LIC-7", "수입사", "대표자", "2021-01-02", "서울청", "서울시", "02", "수입판매업", "CLOSED", "https://detail", "설명", "ACTIVE", "2026-08-12T20:00:00", "2026-08-12T21:00:00", int64(42), int64(17), "2023-01-03", "2026-08-11"}}}, nil
 		default:
 			return nil, fmt.Errorf("unexpected query: %s", query)
 		}
 	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/importers?q=%EC%88%98%EC%9E%85&matched_only=true&page=2&page_size=20", nil)
 	response := httptest.NewRecorder()
-	NewServer(queryer).Handler().ServeHTTP(response, request)
+	NewServer(queryer).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/importers?operating_status=CLOSED&page=2&page_size=20", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
@@ -140,62 +91,33 @@ func TestImporters_동일상호를묶어페이지로응답한다(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Total != 1 || body.Page != 2 || body.PageSize != 20 || len(body.Importers) != 1 {
-		t.Fatalf("unexpected page: %#v", body)
-	}
-	item := body.Importers[0]
-	if item.BusinessName != "수입사" || item.LicenseCount != 3 || item.AddressCount != 2 || item.InstitutionCount != 2 || item.Source != importerSourceName {
-		t.Fatalf("unexpected importer: %#v", item)
+	if body.Total != 1 || len(body.Importers) != 1 || body.Importers[0].OfficialBusinessCode != "BIZ-7" || body.Importers[0].DeclarationCount != 42 {
+		t.Fatalf("unexpected importer list: %#v", body)
 	}
 	for _, query := range queryer.queries {
-		if !strings.Contains(query, "EXISTS (SELECT 1 FROM matched_importers") {
-			t.Fatalf("matched importer filter is missing: %s", query)
-		}
-		upper := strings.ToUpper(query)
-		for _, forbidden := range []string{"INSERT ", "UPDATE ", "DELETE ", "REPLACE "} {
-			if strings.Contains(upper, forbidden) {
-				t.Fatalf("write query found: %s", query)
+		for _, forbidden := range []string{"mfds_importer_licenses", "mfds_importer_evidence", "_raw", "C001", "I2821", "I0250", "I0470"} {
+			if strings.Contains(query, forbidden) {
+				t.Fatalf("legacy source %q found in query: %s", forbidden, query)
 			}
+		}
+		if strings.Contains(strings.ToUpper(query), "INSERT ") || strings.Contains(strings.ToUpper(query), "UPDATE ") || strings.Contains(strings.ToUpper(query), "DELETE ") {
+			t.Fatalf("write query found: %s", query)
 		}
 	}
 }
 
-func TestImporters_잘못된페이지와긴검색어를거부한다(t *testing.T) {
-	for name, target := range map[string]string{
-		"page":    "/api/importers?page=0",
-		"query":   "/api/importers?q=" + url.QueryEscape(strings.Repeat("가", 201)),
-		"matched": "/api/importers?matched_only=maybe",
-	} {
-		t.Run(name, func(t *testing.T) {
-			response := httptest.NewRecorder()
-			NewServer(&fakeQueryer{}).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
-			if response.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d: %s", response.Code, response.Body.String())
-			}
-		})
-	}
-}
-
-func TestImporterDetail_상호의모든인허가와원문이름통계를응답한다(t *testing.T) {
+func TestImporterDetail_exposesOfficialProfileAndLedgerStatistics(t *testing.T) {
 	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
-		if len(args) != 1 || args[0] != "수입사" {
-			return nil, fmt.Errorf("unexpected args: %#v", args)
+		if strings.Contains(query, "SELECT id, official_business_code") {
+			return &fakeRows{values: [][]any{{int64(7), "BIZ-7", "LIC-7", "수입사", "NAME-HASH", "대표자", "2021-01-02", "서울청", "서울시", "02", "수입판매업", "ACTIVE", "https://list", "https://detail", "AA", "BB", "2026-08-12T20:00:00", "설명", "메모", "ACTIVE", "admin", "2026-08-13T20:00:00", "2026-08-01T20:00:00", "2026-08-13T20:00:00"}}}, nil
 		}
-		switch {
-		case strings.Contains(query, "SELECT TRIM(i.license_no)"):
-			return &fakeRows{values: [][]any{
-				{"20260000001", "수입사", "대표자1", "2021-01-02", "서울청", "서울시", "02-0000-0000", "수입식품등 수입판매업", "", "", "2026-08-12T20:43:35"},
-				{"20260000002", "수입사", "대표자2", "2022-03-04", "부산청", "부산시", "051-000-0000", "수입식품등 수입판매업", "폐업", "2026-08-01", "2026-08-12T20:43:35"},
-			}}, nil
-		case strings.Contains(query, "COUNT(DISTINCT COALESCE"):
+		if strings.Contains(query, "FROM mfds_declaration_details") {
 			return &fakeRows{values: [][]any{{int64(42), int64(17), "2023-01-03", "2026-08-11"}}}, nil
-		default:
-			return nil, fmt.Errorf("unexpected query: %s", query)
 		}
+		return nil, fmt.Errorf("unexpected query: %s", query)
 	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/importers/detail?business_name="+url.QueryEscape("수입사"), nil)
 	response := httptest.NewRecorder()
-	NewServer(queryer).Handler().ServeHTTP(response, request)
+	NewServer(queryer).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/importers/detail?importer_id=7", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
@@ -203,84 +125,27 @@ func TestImporterDetail_상호의모든인허가와원문이름통계를응답�
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.BusinessName != "수입사" || len(body.Licenses) != 2 || body.Statistics.DeclarationCount != 42 || body.Statistics.ProductCount != 17 {
-		t.Fatalf("unexpected detail: %#v", body)
-	}
-	for _, query := range queryer.queries {
-		if strings.Contains(query, "mfds_declaration_details") && !strings.Contains(query, "CAST(TRIM(source_importer_name) AS BINARY)") {
-			t.Fatalf("statistics must use exact raw importer name: %s", query)
-		}
+	if body.Profile.OfficialBusinessCode != "BIZ-7" || body.Profile.BusinessNameKeySHA256 != "NAME-HASH" || body.Profile.SourceListSHA256 != "AA" || body.Profile.AdminNote != "메모" || body.Statistics.DeclarationCount != 42 {
+		t.Fatalf("unexpected importer detail: %#v", body)
 	}
 }
 
-func TestImporterDetail_빈상호를거부하고없는상호는찾지못함을응답한다(t *testing.T) {
-	empty := httptest.NewRecorder()
-	NewServer(&fakeQueryer{}).Handler().ServeHTTP(empty, httptest.NewRequest(http.MethodGet, "/api/importers/detail", nil))
-	if empty.Code != http.StatusBadRequest {
-		t.Fatalf("empty status = %d", empty.Code)
-	}
-	missingQueryer := &fakeQueryer{respond: func(string, []any) (RowIterator, error) {
-		return &fakeRows{values: [][]any{}}, nil
-	}}
-	missing := httptest.NewRecorder()
-	NewServer(missingQueryer).Handler().ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/importers/detail?business_name=missing", nil))
-	if missing.Code != http.StatusNotFound {
-		t.Fatalf("missing status = %d: %s", missing.Code, missing.Body.String())
-	}
-}
-
-func TestImporterProducts_제품폴더를내부페이지로응답한다(t *testing.T) {
-	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
-		switch {
-		case strings.Contains(query, "COUNT(DISTINCT CONCAT"):
-			if len(args) != 1 || args[0] != "수입사" {
-				return nil, fmt.Errorf("unexpected count args: %#v", args)
-			}
-			return &fakeRows{values: [][]any{{int64(2)}}}, nil
-		case strings.Contains(query, "GROUP BY CONCAT"):
-			if len(args) != 3 || args[1] != 20 || args[2] != 20 {
-				return nil, fmt.Errorf("unexpected list args: %#v", args)
-			}
-			return &fakeRows{values: [][]any{{"name:abc", "위스키", int64(7), "2025-01-01", "2026-08-01"}}}, nil
-		default:
-			return nil, fmt.Errorf("unexpected query: %s", query)
-		}
-	}}
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/importers/products?business_name="+url.QueryEscape("수입사")+"&page=2&page_size=20", nil)
-	NewServer(queryer).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
-	}
-	var body importerProductPage
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Total != 2 || body.Page != 2 || len(body.Products) != 1 || body.Products[0].ProductName != "위스키" || body.Products[0].DeclarationCount != 7 {
-		t.Fatalf("unexpected products: %#v", body)
-	}
-}
-
-func TestImporterProductDeclarations_제품폴더원장을내부페이지로응답한다(t *testing.T) {
+func TestImporterLedger_internalPaginationAndLinkSource(t *testing.T) {
 	productKey := "name:" + strings.Repeat("a", 64)
 	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
-		switch {
-		case strings.HasPrefix(query, "SELECT COUNT(*)"):
-			if len(args) != 2 || args[0] != "수입사" || args[1] != productKey {
+		if strings.HasPrefix(query, "SELECT EXISTS") {
+			if len(args) != 3 || args[0] != int64(7) || args[1] != int64(7) || args[2] != productKey {
 				return nil, fmt.Errorf("unexpected count args: %#v", args)
 			}
-			return &fakeRows{values: [][]any{{int64(12)}}}, nil
-		case strings.Contains(query, "SELECT rcno"):
-			if len(args) != 4 || args[2] != 10 || args[3] != 10 {
-				return nil, fmt.Errorf("unexpected list args: %#v", args)
-			}
-			return &fakeRows{values: [][]any{{"20260001", "위스키 원문", "WHISKY", "2026-08-01", "위스키", "증류소", "영국", "700 mL", "40%"}}}, nil
-		default:
-			return nil, fmt.Errorf("unexpected query: %s", query)
+			return &fakeRows{values: [][]any{{true, int64(12)}}}, nil
 		}
+		if strings.Contains(query, "SELECT rcno") {
+			return &fakeRows{values: [][]any{{"RCNO-1", "원문", "EN", "2026-08-01", "위스키", "증류소", "영국", "700 mL", "40%", "AUTO"}}}, nil
+		}
+		return nil, fmt.Errorf("unexpected query: %s", query)
 	}}
 	response := httptest.NewRecorder()
-	target := "/api/importers/product-declarations?business_name=" + url.QueryEscape("수입사") + "&product_key=" + url.QueryEscape(productKey) + "&page=2&page_size=10"
+	target := "/api/importers/product-declarations?importer_id=7&product_key=" + url.QueryEscape(productKey) + "&page=2&page_size=10"
 	NewServer(queryer).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
@@ -289,37 +154,99 @@ func TestImporterProductDeclarations_제품폴더원장을내부페이지로응�
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Total != 12 || body.TotalPages != 2 || len(body.Declarations) != 1 || body.Declarations[0].RCNO != "20260001" {
-		t.Fatalf("unexpected declarations: %#v", body)
+	if body.Total != 12 || body.Page != 2 || body.Declarations[0].LinkSource != "AUTO" {
+		t.Fatalf("unexpected ledger page: %#v", body)
 	}
+}
+
+func TestMissingImporters_listAndDetailExposeCandidatesAndAdminFields(t *testing.T) {
+	row := []any{int64(3), "없는 수입사", "NAME-HASH", "AMBIGUOUS", int64(2), `[{"id":1}]`, int64(5), "RCNO-3", "2023-01-01", "2026-08-01", "https://source", "LIST-HASH", "2026-08-02T10:00:00", "설명", "메모", "OPEN", int64(0), "", "", "reviewer", "2026-08-03T10:00:00", "2023-01-01T10:00:00", "2026-08-03T10:00:00"}
+	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
+		if strings.HasPrefix(query, "SELECT COUNT(*) FROM mfds_missing_importers") {
+			return &fakeRows{values: [][]any{{int64(1)}}}, nil
+		}
+		if strings.Contains(query, "SELECT missing.id") {
+			return &fakeRows{values: [][]any{row}}, nil
+		}
+		return nil, fmt.Errorf("unexpected query: %s args=%#v", query, args)
+	}}
+	for name, target := range map[string]string{
+		"list":   "/api/missing-importers?match_status=AMBIGUOUS&page=1&page_size=20",
+		"detail": "/api/missing-importers/detail?missing_importer_id=3",
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			NewServer(queryer).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+			}
+			var value any
+			if err := json.NewDecoder(response.Body).Decode(&value); err != nil {
+				t.Fatal(err)
+			}
+			text, _ := json.Marshal(value)
+			for _, expected := range []string{`"source_importer_name":"없는 수입사"`, `"source_name_key_sha256":"NAME-HASH"`, `"match_status":"AMBIGUOUS"`, `"candidates":[{"id":1}]`, `"source_list_sha256":"LIST-HASH"`, `"admin_note":"메모"`} {
+				if !strings.Contains(string(text), expected) {
+					t.Fatalf("missing %s in %s", expected, text)
+				}
+			}
+		})
+	}
+	var listQuery string
 	for _, query := range queryer.queries {
-		if strings.Contains(query, "mfds_declaration_details") && !strings.Contains(query, "CAST(TRIM(source_importer_name) AS BINARY)") {
-			t.Fatalf("ledger query must use exact raw importer name: %s", query)
+		if strings.Contains(query, "SELECT missing.id") && strings.Contains(query, "ORDER BY missing.updated_at") {
+			listQuery = query
 		}
 	}
-}
-
-func TestImporterProductDeclarations_잘못된제품키를거부한다(t *testing.T) {
-	response := httptest.NewRecorder()
-	target := "/api/importers/product-declarations?business_name=" + url.QueryEscape("수입사") + "&product_key=invalid"
-	NewServer(&fakeQueryer{}).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	if !strings.Contains(listQuery, "WHERE 1 = 1 AND missing.match_status = ?") ||
+		strings.Index(listQuery, "WHERE 1 = 1") < strings.Index(listQuery, "LEFT JOIN mfds_importers") {
+		t.Fatalf("missing importer filters are not in a WHERE clause: %s", listQuery)
 	}
 }
 
-func TestImporterSourceSQL_완료된수집의최신인허가행만사용한다(t *testing.T) {
-	for _, expected := range []string{
-		"PARTITION BY r.license_no",
-		"ORDER BY r.observed_at DESC, r.id DESC",
-		"run.status = 'COMPLETED'",
-		"r.industry_name = '수입식품등 수입판매업'",
-		"i.record_rank = 1",
-		"c.record_rank = 1",
-		"GROUP BY CAST(TRIM(business_name) AS BINARY)",
-	} {
-		if !strings.Contains(importerCTE+importerFromSQL, expected) {
-			t.Fatalf("importer query does not contain %q", expected)
+func TestDeclarations_exposesImporterLinkSource(t *testing.T) {
+	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
+		if strings.HasPrefix(query, "SELECT COUNT(*)") {
+			return &fakeRows{values: [][]any{{int64(1)}}}, nil
+		}
+		if strings.Contains(query, "FROM mfds_declaration_details") {
+			return &fakeRows{values: [][]any{{"RCNO-1", "원본", "정제", "700 mL", "40%", "", "NORMALIZED", "2026-08-01", "위스키", "정제 수입사", "원장 수입사", int64(7), "정제 수입사", true, "ADMIN", "영국", true, false, true, `[]`}}}, nil
+		}
+		return nil, fmt.Errorf("unexpected query: %s args=%#v", query, args)
+	}}
+	response := httptest.NewRecorder()
+	NewServer(queryer).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/declarations?page=1&page_size=20", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"importer_link_source":"ADMIN"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestValidateRequiredSchema_requiresImporterTablesDeclarationAndDetailViewColumns(t *testing.T) {
+	ready := &fakeQueryer{respond: func(query string, _ []any) (RowIterator, error) {
+		if query != requiredSchemaSQL {
+			return nil, fmt.Errorf("unexpected query: %s", query)
+		}
+		return &fakeRows{values: [][]any{{2, 2, 2}}}, nil
+	}}
+	if err := ValidateRequiredSchema(context.Background(), ready); err != nil {
+		t.Fatal(err)
+	}
+	incomplete := &fakeQueryer{respond: func(string, []any) (RowIterator, error) {
+		return &fakeRows{values: [][]any{{1, 1, 1}}}, nil
+	}}
+	if err := ValidateRequiredSchema(context.Background(), incomplete); err == nil {
+		t.Fatal("expected schema guard error")
+	}
+}
+
+func TestDashboardImporterQueries_haveNoWriteOperations(t *testing.T) {
+	queries := []string{importerBaseCTE, importerListSQL, importerProfileSQL, importerStatisticsSQL, importerProductGroupSQL, importerLedgerListSQL, missingImporterSelectSQL, requiredSchemaSQL}
+	for _, query := range queries {
+		upper := strings.ToUpper(query)
+		for _, forbidden := range []string{"INSERT ", "UPDATE ", "DELETE ", "REPLACE ", "MFDS_IMPORTER_LICENSES", "MFDS_IMPORTER_EVIDENCE", "MFDS_C001_IMPORTER_LICENSES_RAW", "MFDS_I2821_IMPORTER_CLOSURES_RAW", "MFDS_I0250_EXCELLENT_IMPORTERS_RAW", "MFDS_I0470_ADMINISTRATIVE_DISPOSITIONS_RAW"} {
+			if strings.Contains(upper, forbidden) {
+				t.Fatalf("forbidden token %q in query: %s", forbidden, query)
+			}
 		}
 	}
 }
@@ -334,241 +261,28 @@ func TestCORS_rejectsNonLoopbackOrigin(t *testing.T) {
 	}
 }
 
-func TestDeclarations_supportsQAndReasonFilter(t *testing.T) {
-	filter, page, size, err := parseListRequest(urlValues("q", "우선", "search", "별칭", "reason", "AMBIGUOUS", "page", "3", "page_size", "10"))
-	if err != nil || filter.Search != "우선" || filter.Reason != "AMBIGUOUS" || page != 3 || size != 10 {
-		t.Fatalf("parsed request = %#v, %d, %d, %v", filter, page, size, err)
+func TestImporterFilter_validatesPaginationAndFilters(t *testing.T) {
+	filter, page, size, err := parseImporterListRequest(urlValues("q", "서울", "matched_only", "true", "operating_status", "ACTIVE", "industry_name", "수입판매업", "sort", "declarations", "order", "desc", "page", "3", "page_size", "10"))
+	if err != nil || page != 3 || size != 10 || !filter.MatchedOnly {
+		t.Fatalf("parsed request = %#v %d %d %v", filter, page, size, err)
 	}
-	where, args := filter.where()
-	if !strings.Contains(where, "JSON_CONTAINS(normalization_reasons") || len(args) != 4 || args[3] != "AMBIGUOUS" {
-		t.Fatalf("reason filter = %q %#v", where, args)
-	}
-}
-
-func TestDeclarations_매칭여부필터와전체목록정렬을지원한다(t *testing.T) {
-	filter, _, _, err := parseListRequest(urlValues(
-		"alcohol_match", "matched",
-		"distillery_match", "unmatched",
-		"region_match", "matched",
-		"sort", "distillery",
-		"order", "asc",
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-	where, args := filter.where()
-	for _, clause := range []string{
-		"declaration_v3.alcohol_candidate_1_id IS NOT NULL",
-		"declaration_v3.distillery_candidate_1_id IS NULL",
-		"declaration_v3.region_candidate_1_id IS NOT NULL",
-	} {
+	where, args := filter.where(true)
+	for _, clause := range []string{"g.business_name LIKE ? ESCAPE '='", "stats.importer_id IS NOT NULL", "g.operating_status = ?", "g.industry_name = ?"} {
 		if !strings.Contains(where, clause) {
-			t.Fatalf("where clause does not contain %q: %s", clause, where)
+			t.Fatalf("missing %s in %s", clause, where)
 		}
 	}
-	if len(args) != 0 {
-		t.Fatalf("matching filter args = %#v", args)
-	}
-	wantOrder := "ORDER BY (declaration_v3.distillery_candidate_1_id IS NOT NULL) ASC, source_processed_date DESC, source_item_id DESC"
-	if !strings.Contains(filter.orderBy(), wantOrder) {
-		t.Fatalf("order by = %q", filter.orderBy())
+	if len(args) != 7 || !strings.Contains(filter.orderBy(), "COALESCE(stats.declaration_count, 0) DESC") {
+		t.Fatalf("where args/order = %q %#v", filter.orderBy(), args)
 	}
 }
 
-func TestDeclarations_허용하지않은매칭필터와정렬값을거부한다(t *testing.T) {
-	for name, values := range map[string]url.Values{
-		"match": urlValues("alcohol_match", "maybe"),
-		"sort":  urlValues("sort", "source_product_name"),
-		"order": urlValues("order", "random"),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, _, _, err := parseListRequest(values); err == nil {
-				t.Fatal("expected validation error")
-			}
-		})
-	}
-}
+func TestContainsLikePattern_와일드카드를문자그대로검색한다(t *testing.T) {
+	t.Parallel()
 
-func TestDeclarationDetail_evidenceIsPublicObjectContract(t *testing.T) {
-	queryer := &fakeQueryer{respond: func(query string, _ []any) (RowIterator, error) {
-		if !strings.Contains(query, "FROM mfds_declaration_details") || !strings.Contains(query, "WHERE rcno") {
-			return nil, fmt.Errorf("unexpected query")
-		}
-		if strings.Contains(query, "alcohol_category_ko") {
-			row := make([]any, len(detailColumns))
-			for index := range row {
-				row[index] = "값"
-			}
-			return &fakeRows{values: [][]any{row}}, nil
-		}
-		return &fakeRows{values: [][]any{{"202600000001", "원본", "source", "정제", "normalized", "REVIEW_REQUIRED", `["AMBIGUOUS"]`, `["700ml? "]`, "2026-08-01", "위스키", "수입사", "영국", "700ml", "700 mL", "40", "40%", "", "", "12", "12 years", "", "", "한정", "#7", "UNKNOWN", "7", "LOT-1", "B-2", "수입사", "증류소"}}}, nil
-	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/declarations/202600000001", nil)
-	response := httptest.NewRecorder()
-	NewServer(queryer).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	if actual := containsLikePattern("100%_A=B"); actual != "%100=%=_A==B%" {
+		t.Fatalf("containsLikePattern() = %q", actual)
 	}
-	var body map[string]any
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	evidence, ok := body["evidence"].([]any)
-	if !ok || len(evidence) == 0 {
-		t.Fatalf("evidence = %#v", body["evidence"])
-	}
-	first, ok := evidence[0].(map[string]any)
-	if !ok || first["label"] != "용량" || first["raw_value"] != "700ml" || first["normalized_value"] != "700 mL" {
-		t.Fatalf("evidence item = %#v", evidence[0])
-	}
-	groups, ok := body["groups"].([]any)
-	if !ok || len(groups) == 0 {
-		t.Fatalf("groups = %#v", body["groups"])
-	}
-}
-
-// 상세 화면은 원장과 정제 값을 모두 노출하되 원본 HTML, 해시, 수집 metadata는 노출하지 않는다.
-func TestDetailColumns_원장과정제를모두노출하고수집metadata는제외한다(t *testing.T) {
-	titles := map[string]bool{}
-	for _, column := range detailColumns {
-		titles[column.Group] = true
-	}
-	for _, expected := range []string{"원장 - 수집한 그대로", "제품명 정제 결과", "용량과 도수", "관리 번호", "증류소 매칭", "리전 매칭", "매칭 이력", "정제 이력"} {
-		if !titles[expected] {
-			t.Fatalf("그룹 %q 가 없다", expected)
-		}
-	}
-	joined := strings.Join(func() []string {
-		expressions := make([]string, len(detailColumns))
-		for index, column := range detailColumns {
-			expressions[index] = column.Expr
-		}
-		return expressions
-	}(), " ")
-	for _, forbidden := range []string{"raw_row_html", "raw_row_sha256", "semantic_sha256", "source_job_id", "source_task_id", "source_fetch_id", "source_detail_href", "claim_"} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("비공개 컬럼 %q 를 노출한다", forbidden)
-		}
-	}
-}
-
-// 원장과 정제를 좌우로 비교하려면 모든 그룹이 한쪽으로 확실히 갈려야 한다.
-func TestGroupSide_원장과정제를좌우로가른다(t *testing.T) {
-	sides := map[string][]string{}
-	for _, column := range detailColumns {
-		side := groupSide(column.Group)
-		if side != "ledger" && side != "normalized" {
-			t.Fatalf("그룹 %q 의 side 가 %q 다", column.Group, side)
-		}
-		if len(sides[side]) == 0 || sides[side][len(sides[side])-1] != column.Group {
-			sides[side] = append(sides[side], column.Group)
-		}
-	}
-	if len(sides["ledger"]) == 0 || len(sides["normalized"]) == 0 {
-		t.Fatalf("한쪽이 비었다: %#v", sides)
-	}
-	if groupSide("원장 - 수집한 그대로") != "ledger" || groupSide("제품명 정제 결과") != "normalized" {
-		t.Fatal("대표 그룹이 반대쪽에 있다")
-	}
-}
-
-// 모든 필드에 각주가 붙어 있어야 화면에서 용어를 설명할 수 있다.
-func TestDetailColumns_모든필드가라벨과각주를가진다(t *testing.T) {
-	for _, column := range detailColumns {
-		if column.Label == "" || column.Hint == "" || column.Group == "" {
-			t.Fatalf("라벨 또는 각주가 비었다: %#v", column)
-		}
-		if strings.Contains(column.Label, "SKU") || strings.Contains(column.Label, "_") {
-			t.Fatalf("라벨에 내부 용어가 남았다: %q", column.Label)
-		}
-	}
-}
-
-func TestQualityAndKeyContracts(t *testing.T) {
-	if !strings.Contains(declarationListSQL, "base_product_name_ko") || !strings.Contains(declarationListSQL, "unit_volume_ml") || strings.Contains(declarationListSQL, "lot_number") {
-		t.Fatalf("list key SQL does not preserve the public key contract: %s", declarationListSQL)
-	}
-	payload, err := json.Marshal(qualityResponse{
-		MonthlyCollections:    []monthlyPoint{{Month: "2026-08", Count: 3}},
-		FieldCoverage:         map[string]float64{"abv": 50},
-		StatusDistribution:    map[string]int64{"NORMALIZED": 3},
-		ReviewReasons:         []reasonPoint{{Code: "AMBIGUOUS", Count: 1}},
-		SKUGroups:             []candidateGroup{{DisplayName: "상품", UnitVolumeML: 700, Declarations: 2, Importers: 1}},
-		DuplicateObservations: []duplicateObservation{{Name: "위스키", Declarations: 2, Observations: 4}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(payload)
-	for _, expected := range []string{`"month":"2026-08"`, `"field_coverage":{"abv":50}`, `"status_distribution":{"NORMALIZED":3}`, `"code":"AMBIGUOUS"`, `"name":"상품"`, `"duplicate_observations"`} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("missing %s in %s", expected, text)
-		}
-	}
-}
-
-func TestDashboardV3Queries_기존View를교체하지않고BaseTable컬럼을조회한다(t *testing.T) {
-	for name, query := range map[string]string{
-		"list":     declarationListSQL,
-		"detail":   declarationDetailSQL,
-		"coverage": coverageSQL,
-	} {
-		if !strings.Contains(query, declarationV3SourceSQL) {
-			t.Fatalf("%s query does not join mfds_declarations v3 columns: %s", name, query)
-		}
-	}
-	for _, column := range []string{"ingredient_percent_raw", "ingredient_percent", "variant_marker_raw", "variant_marker_type", "variant_marker_value", "alcohol_candidate_1_id", "alcohol_candidate_3_score", "selected_alcohol_id", "distillery_candidate_1_id", "distillery_candidate_3_score", "selected_distillery_id", "region_candidate_1_id", "region_candidate_3_score", "selected_region_id", "matching_version", "matching_run_id", "alcohol_match_decision", "distillery_match_source", "region_match_source", "matched_at"} {
-		if !strings.Contains(declarationV3SourceSQL, column) {
-			t.Fatalf("v3 source does not select %s: %s", column, declarationV3SourceSQL)
-		}
-	}
-}
-
-func TestMatchingDetail_후보이름과점수를기준테이블에서조회한다(t *testing.T) {
-	for _, join := range []string{
-		"LEFT JOIN alcohols AS alcohol_candidate_1",
-		"LEFT JOIN alcohols AS alcohol_candidate_2",
-		"LEFT JOIN alcohols AS alcohol_candidate_3",
-		"LEFT JOIN distilleries AS distillery_candidate_1",
-		"LEFT JOIN distilleries AS distillery_candidate_2",
-		"LEFT JOIN distilleries AS distillery_candidate_3",
-		"LEFT JOIN regions AS region_candidate_1",
-		"LEFT JOIN regions AS region_candidate_2",
-		"LEFT JOIN regions AS region_candidate_3",
-	} {
-		if !strings.Contains(declarationMatchingSourceSQL, join) {
-			t.Fatalf("매칭 상세 조회에 %q 조인이 없다", join)
-		}
-	}
-
-	labels := map[string]map[string]bool{}
-	for _, column := range detailColumns {
-		if labels[column.Group] == nil {
-			labels[column.Group] = map[string]bool{}
-		}
-		labels[column.Group][column.Label] = true
-	}
-	for _, group := range []string{"알코올 매칭", "증류소 매칭", "리전 매칭"} {
-		for _, label := range []string{"1순위 후보", "2순위 후보", "3순위 후보"} {
-			if !labels[group][label] {
-				t.Fatalf("%s 그룹에 %s가 없다", group, label)
-			}
-		}
-	}
-	if !labels["매칭 이력"]["매칭 규칙 버전"] || !labels["매칭 이력"]["마지막 매칭 시각"] {
-		t.Fatal("매칭 버전 또는 실행 시각이 없다")
-	}
-	if !labels["매칭 이력"]["매칭 실행 ID"] || !strings.Contains(strings.Join(detailExpressions(), " "), "FORMAT(") {
-		t.Fatal("매칭 실행 ID 또는 소수점 두 자리 점수 포맷이 없다")
-	}
-}
-
-func detailExpressions() []string {
-	result := make([]string, len(detailColumns))
-	for index, column := range detailColumns {
-		result[index] = column.Expr
-	}
-	return result
 }
 
 func urlValues(parts ...string) url.Values {

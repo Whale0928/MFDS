@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,86 +11,75 @@ import (
 	"strings"
 )
 
-const importerSourceName = "C001(수입식품 영업신고 정보)"
-
-const importerCTE = `WITH latest_importers AS (
-	SELECT r.*,
-		ROW_NUMBER() OVER (PARTITION BY r.license_no ORDER BY r.observed_at DESC, r.id DESC) AS record_rank
-	FROM mfds_c001_importer_licenses_raw AS r
-	JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
-	JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
-	WHERE NULLIF(TRIM(r.license_no), '') IS NOT NULL
-		AND NULLIF(TRIM(r.business_name), '') IS NOT NULL
-		AND r.industry_name = '수입식품등 수입판매업'
-), latest_closures AS (
-	SELECT r.*,
-		ROW_NUMBER() OVER (PARTITION BY r.license_no ORDER BY r.closure_date_raw DESC, r.observed_at DESC, r.id DESC) AS record_rank
-	FROM mfds_i2821_importer_closures_raw AS r
-	JOIN mfds_company_registry_fetches AS f ON f.id = r.fetch_id
-	JOIN mfds_company_registry_runs AS run ON run.id = f.run_id AND run.status = 'COMPLETED'
-	WHERE NULLIF(TRIM(r.license_no), '') IS NOT NULL
-), current_importers AS (
-	SELECT i.*,
-		COALESCE(TRIM(c.closure_status_name), '') AS current_closure_status_name,
-		CASE WHEN c.closure_date_raw REGEXP '^[0-9]{8}$' THEN DATE_FORMAT(STR_TO_DATE(c.closure_date_raw, '%Y%m%d'), '%Y-%m-%d') ELSE COALESCE(TRIM(c.closure_date_raw), '') END AS current_closure_date
-	FROM latest_importers AS i
-	LEFT JOIN latest_closures AS c ON c.license_no = i.license_no AND c.record_rank = 1
-	WHERE i.record_rank = 1
-), grouped_importers AS (
-	SELECT CAST(TRIM(business_name) AS BINARY) AS business_key,
-		MIN(TRIM(business_name)) AS business_name,
-		COUNT(*) AS license_count,
-		COUNT(DISTINCT NULLIF(TRIM(location_address), '')) AS address_count,
-		COUNT(DISTINCT NULLIF(TRIM(institution_name), '')) AS institution_count,
-		COALESCE(DATE_FORMAT(MIN(CASE WHEN permit_date_raw REGEXP '^[0-9]{8}$' THEN STR_TO_DATE(permit_date_raw, '%Y%m%d') END), '%Y-%m-%d'), '') AS first_permit_date,
-		DATE_FORMAT(MAX(observed_at), '%Y-%m-%dT%H:%i:%s') AS observed_at
-	FROM current_importers
-	GROUP BY CAST(TRIM(business_name) AS BINARY)
-), matched_importers AS (
-	SELECT CAST(TRIM(source_importer_name) AS BINARY) AS business_key
+const importerBaseCTE = `WITH declaration_stats AS (
+	SELECT importer_id,
+		COUNT(*) AS declaration_count,
+		COUNT(DISTINCT ` + importerProductNameSQL + `) AS product_count,
+		COALESCE(DATE_FORMAT(MIN(source_processed_date), '%Y-%m-%d'), '') AS first_import_date,
+		COALESCE(DATE_FORMAT(MAX(source_processed_date), '%Y-%m-%d'), '') AS last_import_date
 	FROM mfds_declaration_details
-	WHERE NULLIF(TRIM(source_importer_name), '') IS NOT NULL
-	GROUP BY CAST(TRIM(source_importer_name) AS BINARY)
+	WHERE importer_id IS NOT NULL
+	GROUP BY importer_id
+), grouped_importers AS (
+	SELECT id AS importer_id,
+		official_business_code, license_no, business_name,
+		COALESCE(TRIM(representative_name), '') AS representative_name,
+		COALESCE(DATE_FORMAT(permit_date, '%Y-%m-%d'), '') AS permit_date,
+		COALESCE(TRIM(institution_name), '') AS institution_name,
+		COALESCE(TRIM(primary_address), '') AS primary_address,
+		COALESCE(TRIM(telephone_no), '') AS telephone_no,
+		COALESCE(TRIM(industry_name), '') AS industry_name,
+		operating_status, COALESCE(source_detail_url, '') AS source_detail_url,
+		COALESCE(description, '') AS description,
+		COALESCE(admin_status, '') AS admin_status,
+		DATE_FORMAT(source_observed_at, '%Y-%m-%dT%H:%i:%s') AS source_observed_at,
+		DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%s') AS updated_at
+	FROM mfds_importers
 )`
 
-const importerFromSQL = ` FROM current_importers AS i WHERE 1 = 1`
+const importerListSQL = importerBaseCTE + `
+	SELECT g.importer_id, g.official_business_code, g.license_no, g.business_name,
+		g.representative_name, g.permit_date, g.institution_name, g.primary_address,
+		g.telephone_no, g.industry_name, g.operating_status, g.source_detail_url,
+		g.description, g.admin_status, g.source_observed_at, g.updated_at,
+		COALESCE(stats.declaration_count, 0), COALESCE(stats.product_count, 0),
+		COALESCE(stats.first_import_date, ''), COALESCE(stats.last_import_date, '')
+	FROM grouped_importers AS g
+	LEFT JOIN declaration_stats AS stats ON stats.importer_id = g.importer_id
+	WHERE 1 = 1`
 
-const importerListSQL = importerCTE + `
-SELECT g.business_name, g.license_count, g.address_count, g.institution_count, g.first_permit_date, g.observed_at
-FROM grouped_importers AS g WHERE 1 = 1`
-
-const importerLicenseListSQL = importerCTE + `
-SELECT TRIM(i.license_no),
-	COALESCE(TRIM(i.business_name), ''),
-	COALESCE(TRIM(i.president_name), ''),
-	CASE WHEN i.permit_date_raw REGEXP '^[0-9]{8}$' THEN DATE_FORMAT(STR_TO_DATE(i.permit_date_raw, '%Y%m%d'), '%Y-%m-%d') ELSE COALESCE(TRIM(i.permit_date_raw), '') END,
-	COALESCE(TRIM(i.institution_name), ''),
-	COALESCE(TRIM(i.location_address), ''),
-	COALESCE(TRIM(i.telephone_no), ''),
-	COALESCE(TRIM(i.industry_name), ''),
-	i.current_closure_status_name,
-	i.current_closure_date,
-	DATE_FORMAT(i.observed_at, '%Y-%m-%dT%H:%i:%s')` + importerFromSQL + `
-	AND CAST(TRIM(i.business_name) AS BINARY) = CAST(? AS BINARY)
-ORDER BY i.permit_date_raw, i.license_no`
+const importerProfileSQL = `SELECT id, official_business_code, license_no, business_name,
+	COALESCE(HEX(business_name_key_sha256), ''),
+	COALESCE(TRIM(representative_name), ''), COALESCE(DATE_FORMAT(permit_date, '%Y-%m-%d'), ''),
+	COALESCE(TRIM(institution_name), ''), COALESCE(TRIM(primary_address), ''),
+	COALESCE(TRIM(telephone_no), ''), COALESCE(TRIM(industry_name), ''), operating_status,
+	COALESCE(source_list_url, ''), COALESCE(source_detail_url, ''),
+	COALESCE(HEX(source_list_sha256), ''), COALESCE(HEX(source_detail_sha256), ''),
+	COALESCE(DATE_FORMAT(source_observed_at, '%Y-%m-%dT%H:%i:%s'), ''),
+	COALESCE(description, ''), COALESCE(admin_note, ''), COALESCE(admin_status, ''),
+	COALESCE(reviewed_by, ''), COALESCE(DATE_FORMAT(reviewed_at, '%Y-%m-%dT%H:%i:%s'), ''),
+	COALESCE(DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s'), ''),
+	COALESCE(DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%s'), '')
+FROM mfds_importers
+WHERE id = ?
+LIMIT 1`
 
 const importerStatisticsSQL = `SELECT COUNT(*),
-	COUNT(DISTINCT COALESCE(NULLIF(TRIM(base_product_name_ko), ''), NULLIF(TRIM(base_product_name_en), ''), NULLIF(TRIM(source_product_name_ko), ''), NULLIF(TRIM(source_product_name_en), ''), NULLIF(TRIM(source_item_name), ''))),
+	COUNT(DISTINCT ` + importerProductNameSQL + `),
 	COALESCE(DATE_FORMAT(MIN(source_processed_date), '%Y-%m-%d'), ''),
 	COALESCE(DATE_FORMAT(MAX(source_processed_date), '%Y-%m-%d'), '')
 FROM mfds_declaration_details
-WHERE CAST(TRIM(source_importer_name) AS BINARY) = CAST(? AS BINARY)`
+WHERE importer_id = ?`
 
 const importerProductNameSQL = `COALESCE(NULLIF(TRIM(base_product_name_ko), ''), NULLIF(TRIM(base_product_name_en), ''), NULLIF(TRIM(source_product_name_ko), ''), NULLIF(TRIM(source_product_name_en), ''), NULLIF(TRIM(source_item_name), ''), '이름 미정')`
 const importerProductKeySQL = `CONCAT('name:', LOWER(SHA2(` + importerProductNameSQL + `, 256)))`
 
 const importerProductGroupSQL = `SELECT ` + importerProductKeySQL + `,
-	MIN(` + importerProductNameSQL + `),
-	COUNT(*),
+	MIN(` + importerProductNameSQL + `), COUNT(*),
 	COALESCE(DATE_FORMAT(MIN(source_processed_date), '%Y-%m-%d'), ''),
 	COALESCE(DATE_FORMAT(MAX(source_processed_date), '%Y-%m-%d'), '')
 FROM mfds_declaration_details
-WHERE CAST(TRIM(source_importer_name) AS BINARY) = CAST(? AS BINARY)
+WHERE importer_id = ?
 GROUP BY ` + importerProductKeySQL
 
 const importerLedgerListSQL = `SELECT rcno,
@@ -100,14 +90,19 @@ const importerLedgerListSQL = `SELECT rcno,
 	COALESCE(TRIM(source_overseas_establishment_name), ''),
 	COALESCE(TRIM(source_manufacture_country_name), ''),
 	COALESCE(NULLIF(TRIM(volume_raw), ''), CASE WHEN unit_volume_ml IS NOT NULL THEN CONCAT(unit_volume_ml, ' mL') ELSE '' END),
-	COALESCE(NULLIF(TRIM(abv_raw), ''), CASE WHEN abv_percent IS NOT NULL THEN CONCAT(abv_percent, '%') ELSE '' END)
+	COALESCE(NULLIF(TRIM(abv_raw), ''), CASE WHEN abv_percent IS NOT NULL THEN CONCAT(abv_percent, '%') ELSE '' END),
+	COALESCE(importer_link_source, '')
 FROM mfds_declaration_details
-WHERE CAST(TRIM(source_importer_name) AS BINARY) = CAST(? AS BINARY)
+WHERE importer_id = ?
 	AND ` + importerProductKeySQL + ` = ?`
 
 type importerFilter struct {
-	Search      string
-	MatchedOnly bool
+	Search          string
+	MatchedOnly     bool
+	OperatingStatus string
+	IndustryName    string
+	Sort            string
+	Order           string
 }
 
 func (s *Server) importers(w http.ResponseWriter, r *http.Request) {
@@ -116,8 +111,8 @@ func (s *Server) importers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	where, args := filter.where()
-	countRows, err := s.queryer.QueryContext(r.Context(), importerCTE+" SELECT COUNT(*) FROM grouped_importers AS g WHERE 1 = 1"+where, args...)
+	countWhere, countArgs := filter.where(false)
+	countRows, err := s.queryer.QueryContext(r.Context(), importerBaseCTE+" SELECT COUNT(*) FROM grouped_importers AS g WHERE 1 = 1"+countWhere, countArgs...)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
@@ -127,8 +122,9 @@ func (s *Server) importers(w http.ResponseWriter, r *http.Request) {
 		writeDatabaseError(w, err)
 		return
 	}
-	args = append(args, pageSize, (page-1)*pageSize)
-	rows, err := s.queryer.QueryContext(r.Context(), importerListSQL+where+" ORDER BY g.business_name LIMIT ? OFFSET ?", args...)
+	listWhere, listArgs := filter.where(true)
+	listArgs = append(listArgs, pageSize, (page-1)*pageSize)
+	rows, err := s.queryer.QueryContext(r.Context(), importerListSQL+listWhere+filter.orderBy()+" LIMIT ? OFFSET ?", listArgs...)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
@@ -143,7 +139,11 @@ func (s *Server) importers(w http.ResponseWriter, r *http.Request) {
 
 func parseImporterListRequest(values url.Values) (importerFilter, int, int, error) {
 	filter := importerFilter{
-		Search: strings.TrimSpace(values.Get("q")),
+		Search:          strings.TrimSpace(values.Get("q")),
+		OperatingStatus: strings.TrimSpace(values.Get("operating_status")),
+		IndustryName:    strings.TrimSpace(values.Get("industry_name")),
+		Sort:            strings.TrimSpace(values.Get("sort")),
+		Order:           strings.TrimSpace(values.Get("order")),
 	}
 	if len([]rune(filter.Search)) > 200 {
 		return importerFilter{}, 0, 0, errors.New("q must be 200 characters or fewer")
@@ -154,6 +154,21 @@ func parseImporterListRequest(values url.Values) (importerFilter, int, int, erro
 			return importerFilter{}, 0, 0, errors.New("matched_only must be true or false")
 		}
 		filter.MatchedOnly = matchedOnly
+	}
+	if len([]rune(filter.OperatingStatus)) > 32 || len([]rune(filter.IndustryName)) > 255 {
+		return importerFilter{}, 0, 0, errors.New("filter is too long")
+	}
+	if filter.Sort == "" {
+		filter.Sort = "business_name"
+	}
+	if filter.Order == "" {
+		filter.Order = "asc"
+	}
+	if filter.Sort != "business_name" && filter.Sort != "declarations" && filter.Sort != "last_import" && filter.Sort != "observed_at" {
+		return importerFilter{}, 0, 0, errors.New("invalid sort")
+	}
+	if filter.Order != "asc" && filter.Order != "desc" {
+		return importerFilter{}, 0, 0, errors.New("invalid order")
 	}
 	page, err := positiveInt(values.Get("page"), 1, 100000)
 	if err != nil {
@@ -166,15 +181,25 @@ func parseImporterListRequest(values url.Values) (importerFilter, int, int, erro
 	return filter, page, pageSize, nil
 }
 
-func (f importerFilter) where() (string, []any) {
+func (f importerFilter) where(withDeclarationStats bool) (string, []any) {
 	clauses, args := []string{}, []any{}
 	if f.Search != "" {
-		clauses = append(clauses, "g.business_name LIKE ?")
-		needle := "%" + f.Search + "%"
-		args = append(args, needle)
+		clauses = append(clauses, "(g.business_name LIKE ? ESCAPE '=' OR g.official_business_code LIKE ? ESCAPE '=' OR g.license_no LIKE ? ESCAPE '=' OR g.representative_name LIKE ? ESCAPE '=' OR g.primary_address LIKE ? ESCAPE '=')")
+		needle := containsLikePattern(f.Search)
+		args = append(args, needle, needle, needle, needle, needle)
 	}
 	if f.MatchedOnly {
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM matched_importers AS m WHERE m.business_key = g.business_key)")
+		if withDeclarationStats {
+			clauses = append(clauses, "stats.importer_id IS NOT NULL")
+		} else {
+			clauses = append(clauses, "EXISTS (SELECT 1 FROM mfds_declaration_details AS matched_declaration WHERE matched_declaration.importer_id = g.importer_id)")
+		}
+	}
+	if f.OperatingStatus != "" {
+		clauses, args = append(clauses, "g.operating_status = ?"), append(args, f.OperatingStatus)
+	}
+	if f.IndustryName != "" {
+		clauses, args = append(clauses, "g.industry_name = ?"), append(args, f.IndustryName)
 	}
 	if len(clauses) == 0 {
 		return "", args
@@ -182,36 +207,51 @@ func (f importerFilter) where() (string, []any) {
 	return " AND " + strings.Join(clauses, " AND "), args
 }
 
+func (f importerFilter) orderBy() string {
+	column := map[string]string{
+		"business_name": "g.business_name",
+		"declarations":  "COALESCE(stats.declaration_count, 0)",
+		"last_import":   "COALESCE(stats.last_import_date, '')",
+		"observed_at":   "g.source_observed_at",
+	}[f.Sort]
+	return " ORDER BY " + column + " " + strings.ToUpper(f.Order) + ", g.importer_id ASC"
+}
+
 func (s *Server) importerDetail(w http.ResponseWriter, r *http.Request) {
-	businessName := strings.TrimSpace(r.URL.Query().Get("business_name"))
-	if businessName == "" || len([]rune(businessName)) > 512 {
-		writeError(w, http.StatusBadRequest, "business_name is required and must be 512 characters or fewer")
+	importerID, err := parseImporterID(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rows, err := s.queryer.QueryContext(r.Context(), importerLicenseListSQL, businessName)
+	rows, err := s.queryer.QueryContext(r.Context(), importerProfileSQL, importerID)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
-	licenses, err := scanImporterList(rows)
-	if err != nil {
-		writeDatabaseError(w, err)
-		return
-	}
-	if len(licenses) == 0 {
+	defer rows.Close()
+	var profile importerProfile
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			writeDatabaseError(w, err)
+			return
+		}
 		writeError(w, http.StatusNotFound, "importer was not found")
 		return
 	}
-	statistics, err := s.importerStatistics(r.Context(), businessName)
+	if err := rows.Scan(&profile.ImporterID, &profile.OfficialBusinessCode, &profile.LicenseNo, &profile.BusinessName, &profile.BusinessNameKeySHA256, &profile.Representative, &profile.PermitDate, &profile.InstitutionName, &profile.PrimaryAddress, &profile.Telephone, &profile.IndustryName, &profile.OperatingStatus, &profile.SourceListURL, &profile.SourceDetailURL, &profile.SourceListSHA256, &profile.SourceDetailSHA256, &profile.SourceObservedAt, &profile.Description, &profile.AdminNote, &profile.AdminStatus, &profile.ReviewedBy, &profile.ReviewedAt, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	statistics, err := s.importerStatistics(r.Context(), importerID)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, importerDetailResponse{BusinessName: businessName, Licenses: licenses, Statistics: statistics})
+	writeJSON(w, http.StatusOK, importerDetailResponse{ImporterID: profile.ImporterID, BusinessName: profile.BusinessName, Profile: profile, Statistics: statistics})
 }
 
-func (s *Server) importerStatistics(ctx context.Context, businessName string) (importerStatistics, error) {
-	rows, err := s.queryer.QueryContext(ctx, importerStatisticsSQL, businessName)
+func (s *Server) importerStatistics(ctx context.Context, importerID int64) (importerStatistics, error) {
+	rows, err := s.queryer.QueryContext(ctx, importerStatisticsSQL, importerID)
 	if err != nil {
 		return importerStatistics{}, err
 	}
@@ -223,22 +263,27 @@ func (s *Server) importerStatistics(ctx context.Context, businessName string) (i
 }
 
 func (s *Server) importerProducts(w http.ResponseWriter, r *http.Request) {
-	businessName, page, pageSize, err := parseImporterLedgerRequest(r.URL.Query(), false)
+	importerID, page, pageSize, err := parseImporterLedgerRequest(r.URL.Query(), false)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	countRows, err := s.queryer.QueryContext(r.Context(), `SELECT COUNT(DISTINCT `+importerProductKeySQL+`) FROM mfds_declaration_details WHERE CAST(TRIM(source_importer_name) AS BINARY) = CAST(? AS BINARY)`, businessName)
+	countRows, err := s.queryer.QueryContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM mfds_importers WHERE id = ?), COUNT(DISTINCT `+importerProductKeySQL+`) FROM mfds_declaration_details WHERE importer_id = ?`, importerID, importerID)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
+	var exists bool
 	var total int64
-	if err := scanSingle(countRows, &total); err != nil {
+	if err := scanSingle(countRows, &exists, &total); err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
-	rows, err := s.queryer.QueryContext(r.Context(), importerProductGroupSQL+` ORDER BY MAX(source_processed_date) DESC, MIN(`+importerProductNameSQL+`) LIMIT ? OFFSET ?`, businessName, pageSize, (page-1)*pageSize)
+	if !exists {
+		writeError(w, http.StatusNotFound, "importer was not found")
+		return
+	}
+	rows, err := s.queryer.QueryContext(r.Context(), importerProductGroupSQL+` ORDER BY MAX(source_processed_date) DESC, MIN(`+importerProductNameSQL+`), `+importerProductKeySQL+` LIMIT ? OFFSET ?`, importerID, pageSize, (page-1)*pageSize)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
@@ -252,7 +297,7 @@ func (s *Server) importerProducts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) importerProductDeclarations(w http.ResponseWriter, r *http.Request) {
-	businessName, page, pageSize, err := parseImporterLedgerRequest(r.URL.Query(), true)
+	importerID, page, pageSize, err := parseImporterLedgerRequest(r.URL.Query(), true)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -262,17 +307,22 @@ func (s *Server) importerProductDeclarations(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "invalid product_key")
 		return
 	}
-	countRows, err := s.queryer.QueryContext(r.Context(), `SELECT COUNT(*) FROM mfds_declaration_details WHERE CAST(TRIM(source_importer_name) AS BINARY) = CAST(? AS BINARY) AND `+importerProductKeySQL+` = ?`, businessName, productKey)
+	countRows, err := s.queryer.QueryContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM mfds_importers WHERE id = ?), COUNT(*) FROM mfds_declaration_details WHERE importer_id = ? AND `+importerProductKeySQL+` = ?`, importerID, importerID, productKey)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
+	var exists bool
 	var total int64
-	if err := scanSingle(countRows, &total); err != nil {
+	if err := scanSingle(countRows, &exists, &total); err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
-	rows, err := s.queryer.QueryContext(r.Context(), importerLedgerListSQL+` ORDER BY source_processed_date DESC, source_item_id DESC LIMIT ? OFFSET ?`, businessName, productKey, pageSize, (page-1)*pageSize)
+	if !exists {
+		writeError(w, http.StatusNotFound, "importer was not found")
+		return
+	}
+	rows, err := s.queryer.QueryContext(r.Context(), importerLedgerListSQL+` ORDER BY source_processed_date DESC, source_item_id DESC LIMIT ? OFFSET ?`, importerID, productKey, pageSize, (page-1)*pageSize)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
@@ -285,14 +335,14 @@ func (s *Server) importerProductDeclarations(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, importerLedgerPage{Declarations: items, Page: page, PageSize: pageSize, Total: total, TotalPages: pages(total, pageSize)})
 }
 
-func parseImporterLedgerRequest(values url.Values, declarationPage bool) (string, int, int, error) {
-	businessName := strings.TrimSpace(values.Get("business_name"))
-	if businessName == "" || len([]rune(businessName)) > 512 {
-		return "", 0, 0, errors.New("business_name is required and must be 512 characters or fewer")
+func parseImporterLedgerRequest(values url.Values, declarationPage bool) (int64, int, int, error) {
+	importerID, err := parseImporterID(values)
+	if err != nil {
+		return 0, 0, 0, err
 	}
 	page, err := positiveInt(values.Get("page"), 1, 100000)
 	if err != nil {
-		return "", 0, 0, errors.New("invalid page")
+		return 0, 0, 0, errors.New("invalid page")
 	}
 	defaultSize := 20
 	if declarationPage {
@@ -300,9 +350,17 @@ func parseImporterLedgerRequest(values url.Values, declarationPage bool) (string
 	}
 	pageSize, err := positiveInt(values.Get("page_size"), defaultSize, maxPageSize)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("page_size must be between 1 and %d", maxPageSize)
+		return 0, 0, 0, fmt.Errorf("page_size must be between 1 and %d", maxPageSize)
 	}
-	return businessName, page, pageSize, nil
+	return importerID, page, pageSize, nil
+}
+
+func parseImporterID(values url.Values) (int64, error) {
+	importerID, err := strconv.ParseInt(strings.TrimSpace(values.Get("importer_id")), 10, 64)
+	if err != nil || importerID <= 0 {
+		return 0, errors.New("importer_id must be a positive integer")
+	}
+	return importerID, nil
 }
 
 func scanImporterProductGroups(rows RowIterator) ([]importerProductGroup, error) {
@@ -323,7 +381,7 @@ func scanImporterLedgerItems(rows RowIterator) ([]importerLedgerItem, error) {
 	result := []importerLedgerItem{}
 	for rows.Next() {
 		var value importerLedgerItem
-		if err := rows.Scan(&value.RCNO, &value.SourceName, &value.SourceNameEnglish, &value.ProcessedAt, &value.ItemName, &value.ManufacturerName, &value.Country, &value.Volume, &value.ABV); err != nil {
+		if err := rows.Scan(&value.RCNO, &value.SourceName, &value.SourceNameEnglish, &value.ProcessedAt, &value.ItemName, &value.ManufacturerName, &value.Country, &value.Volume, &value.ABV, &value.LinkSource); err != nil {
 			return nil, err
 		}
 		result = append(result, value)
@@ -336,25 +394,167 @@ func scanImporterGroups(rows RowIterator) ([]importerGroupListItem, error) {
 	result := []importerGroupListItem{}
 	for rows.Next() {
 		var value importerGroupListItem
-		if err := rows.Scan(&value.BusinessName, &value.LicenseCount, &value.AddressCount, &value.InstitutionCount, &value.FirstPermitDate, &value.ObservedAt); err != nil {
+		if err := rows.Scan(&value.ImporterID, &value.OfficialBusinessCode, &value.LicenseNo, &value.BusinessName, &value.Representative, &value.PermitDate, &value.InstitutionName, &value.PrimaryAddress, &value.Telephone, &value.IndustryName, &value.OperatingStatus, &value.SourceDetailURL, &value.Description, &value.AdminStatus, &value.SourceObservedAt, &value.UpdatedAt, &value.DeclarationCount, &value.ProductCount, &value.FirstImportDate, &value.LastImportDate); err != nil {
 			return nil, err
 		}
-		value.Source = importerSourceName
 		result = append(result, value)
 	}
 	return result, rows.Err()
 }
 
-func scanImporterList(rows RowIterator) ([]importerListItem, error) {
+const missingImporterSelectSQL = `SELECT missing.id, missing.source_importer_name,
+	COALESCE(HEX(missing.source_name_key_sha256), ''), missing.match_status,
+	missing.candidate_count, COALESCE(CAST(missing.candidates_json AS CHAR), '[]'),
+	missing.declaration_count, COALESCE(missing.sample_rcno, ''),
+	COALESCE(DATE_FORMAT(missing.first_processed_date, '%Y-%m-%d'), ''),
+	COALESCE(DATE_FORMAT(missing.last_processed_date, '%Y-%m-%d'), ''),
+	COALESCE(missing.source_list_url, ''), COALESCE(HEX(missing.source_list_sha256), ''),
+	COALESCE(DATE_FORMAT(missing.source_observed_at, '%Y-%m-%dT%H:%i:%s'), ''),
+	COALESCE(missing.description, ''), COALESCE(missing.admin_note, ''),
+	missing.admin_status, COALESCE(missing.resolved_importer_id, 0),
+	COALESCE(resolved.business_name, ''), COALESCE(missing.resolution_source, ''),
+	COALESCE(missing.reviewed_by, ''), COALESCE(DATE_FORMAT(missing.reviewed_at, '%Y-%m-%dT%H:%i:%s'), ''),
+	COALESCE(DATE_FORMAT(missing.created_at, '%Y-%m-%dT%H:%i:%s'), ''),
+	COALESCE(DATE_FORMAT(missing.updated_at, '%Y-%m-%dT%H:%i:%s'), '')
+FROM mfds_missing_importers AS missing
+LEFT JOIN mfds_importers AS resolved ON resolved.id = missing.resolved_importer_id`
+
+type missingImporterFilter struct {
+	Search      string
+	MatchStatus string
+	AdminStatus string
+}
+
+func (s *Server) missingImporters(w http.ResponseWriter, r *http.Request) {
+	filter, page, pageSize, err := parseMissingImporterListRequest(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	where, args := filter.where()
+	countRows, err := s.queryer.QueryContext(r.Context(), "SELECT COUNT(*) FROM mfds_missing_importers AS missing WHERE 1 = 1"+where, args...)
+	if err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	var total int64
+	if err := scanSingle(countRows, &total); err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	args = append(args, pageSize, (page-1)*pageSize)
+	rows, err := s.queryer.QueryContext(r.Context(), missingImporterSelectSQL+" WHERE 1 = 1"+where+" ORDER BY missing.updated_at DESC, missing.id ASC LIMIT ? OFFSET ?", args...)
+	if err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	items, err := scanMissingImporters(rows)
+	if err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, missingImporterListResponse{MissingImporters: items, Page: page, PageSize: pageSize, Total: total, TotalPages: pages(total, pageSize)})
+}
+
+func parseMissingImporterListRequest(values url.Values) (missingImporterFilter, int, int, error) {
+	filter := missingImporterFilter{
+		Search:      strings.TrimSpace(values.Get("q")),
+		MatchStatus: strings.ToUpper(strings.TrimSpace(values.Get("match_status"))),
+		AdminStatus: strings.ToUpper(strings.TrimSpace(values.Get("admin_status"))),
+	}
+	if len([]rune(filter.Search)) > 200 {
+		return missingImporterFilter{}, 0, 0, errors.New("q must be 200 characters or fewer")
+	}
+	if filter.MatchStatus != "" && filter.MatchStatus != "MISSING" && filter.MatchStatus != "AMBIGUOUS" {
+		return missingImporterFilter{}, 0, 0, errors.New("match_status must be MISSING or AMBIGUOUS")
+	}
+	if filter.AdminStatus != "" && filter.AdminStatus != "OPEN" && filter.AdminStatus != "RESOLVED" && filter.AdminStatus != "DISMISSED" {
+		return missingImporterFilter{}, 0, 0, errors.New("admin_status must be OPEN, RESOLVED or DISMISSED")
+	}
+	page, err := positiveInt(values.Get("page"), 1, 100000)
+	if err != nil {
+		return missingImporterFilter{}, 0, 0, errors.New("invalid page")
+	}
+	pageSize, err := positiveInt(values.Get("page_size"), defaultPageSize, maxPageSize)
+	if err != nil {
+		return missingImporterFilter{}, 0, 0, fmt.Errorf("page_size must be between 1 and %d", maxPageSize)
+	}
+	return filter, page, pageSize, nil
+}
+
+func (f missingImporterFilter) where() (string, []any) {
+	clauses, args := []string{}, []any{}
+	if f.Search != "" {
+		needle := containsLikePattern(f.Search)
+		clauses = append(clauses, "(missing.source_importer_name LIKE ? ESCAPE '=' OR missing.sample_rcno LIKE ? ESCAPE '=' OR missing.description LIKE ? ESCAPE '=' OR missing.admin_note LIKE ? ESCAPE '=')")
+		args = append(args, needle, needle, needle, needle)
+	}
+	if f.MatchStatus != "" {
+		clauses, args = append(clauses, "missing.match_status = ?"), append(args, f.MatchStatus)
+	}
+	if f.AdminStatus != "" {
+		clauses, args = append(clauses, "missing.admin_status = ?"), append(args, f.AdminStatus)
+	}
+	if len(clauses) == 0 {
+		return "", args
+	}
+	return " AND " + strings.Join(clauses, " AND "), args
+}
+
+func (s *Server) missingImporterDetail(w http.ResponseWriter, r *http.Request) {
+	missingID, err := parseMissingImporterID(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rows, err := s.queryer.QueryContext(r.Context(), missingImporterSelectSQL+" WHERE missing.id = ? LIMIT 1", missingID)
+	if err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	items, err := scanMissingImporters(rows)
+	if err != nil {
+		writeDatabaseError(w, err)
+		return
+	}
+	if len(items) == 0 {
+		writeError(w, http.StatusNotFound, "missing importer was not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, items[0])
+}
+
+func parseMissingImporterID(values url.Values) (int64, error) {
+	raw := strings.TrimSpace(values.Get("missing_importer_id"))
+	if raw == "" {
+		raw = strings.TrimSpace(values.Get("id"))
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return 0, errors.New("missing_importer_id must be a positive integer")
+	}
+	return value, nil
+}
+
+func scanMissingImporters(rows RowIterator) ([]missingImporterListItem, error) {
 	defer rows.Close()
-	result := []importerListItem{}
+	result := []missingImporterListItem{}
 	for rows.Next() {
-		var value importerListItem
-		if err := rows.Scan(&value.LicenseNo, &value.BusinessName, &value.Representative, &value.PermitDate, &value.InstitutionName, &value.Address, &value.Telephone, &value.IndustryName, &value.ClosureStatusName, &value.ClosureDate, &value.ObservedAt); err != nil {
+		var value missingImporterListItem
+		var candidates string
+		if err := rows.Scan(&value.MissingImporterID, &value.SourceImporterName, &value.SourceNameKeySHA256, &value.MatchStatus, &value.CandidateCount, &candidates, &value.DeclarationCount, &value.SampleRCNO, &value.FirstProcessedDate, &value.LastProcessedDate, &value.SourceListURL, &value.SourceListSHA256, &value.SourceObservedAt, &value.Description, &value.AdminNote, &value.AdminStatus, &value.ResolvedImporterID, &value.ResolvedImporterBusinessName, &value.ResolutionSource, &value.ReviewedBy, &value.ReviewedAt, &value.CreatedAt, &value.UpdatedAt); err != nil {
 			return nil, err
 		}
-		value.Source = importerSourceName
+		value.Candidates = jsonDocument(candidates)
 		result = append(result, value)
 	}
 	return result, rows.Err()
+}
+
+func jsonDocument(value string) json.RawMessage {
+	value = strings.TrimSpace(value)
+	if value == "" || !json.Valid([]byte(value)) {
+		return json.RawMessage("[]")
+	}
+	return json.RawMessage(value)
 }

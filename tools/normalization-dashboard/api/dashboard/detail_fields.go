@@ -78,6 +78,8 @@ var detailColumns = []detailColumn{
 	{"관리 번호", "COALESCE(CAST(expiry_end AS CHAR), '')", "소비기한 종료", "소비기한 범위의 종료일입니다."},
 
 	{"수입사와 제조사", "COALESCE(importer_base_name, '')", "수입사 정제명", "주식회사, (주) 같은 표기를 정리한 수입사 이름입니다."},
+	{"수입사와 제조사", "COALESCE(CAST(declaration_v3.importer_id AS CHAR), '')", "정제 수입사 ID", "공식 업체정보와 원장 수입사명이 완전히 일치해 연결된 정제 수입사 식별자입니다."},
+	{"수입사와 제조사", "COALESCE(linked_importer.business_name, '')", "공식 상호", "정제 수입사 원장에서 확인한 동일 상호입니다. 값이 없으면 공식 업체정보와 연결되지 않은 신고입니다."},
 	{"수입사와 제조사", "COALESCE(importer_search_key, '')", "수입사 검색용 이름", "같은 수입사를 찾기 위한 비교 전용 형태입니다."},
 	{"수입사와 제조사", "COALESCE(legal_entity_type, '')", "법인 형태", "주식회사, 유한회사처럼 원문에서 떼어낸 법인 표기입니다."},
 	{"수입사와 제조사", "COALESCE(overseas_establishment_search_key, '')", "해외 제조업소 검색용 이름", "해외 제조업소를 비교하기 위한 전용 형태입니다."},

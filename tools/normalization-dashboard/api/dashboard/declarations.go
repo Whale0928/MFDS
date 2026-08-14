@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type declarationFilter struct {
@@ -16,6 +17,10 @@ type declarationFilter struct {
 	Importer        string
 	Country         string
 	Reason          string
+	ImporterLink    string
+	ImporterID      int64
+	ProcessedFrom   string
+	ProcessedTo     string
 	AlcoholMatch    string
 	DistilleryMatch string
 	RegionMatch     string
@@ -30,7 +35,11 @@ func (s *Server) declarations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	where, args := filter.where()
-	countRows, err := s.queryer.QueryContext(r.Context(), "SELECT COUNT(*) FROM "+declarationV3SourceSQL+where, args...)
+	countSource := declarationV3BaseSourceSQL
+	if filter.Search != "" {
+		countSource = declarationV3SourceSQL
+	}
+	countRows, err := s.queryer.QueryContext(r.Context(), "SELECT COUNT(*) FROM "+countSource+where, args...)
 	if err != nil {
 		writeDatabaseError(w, err)
 		return
@@ -54,7 +63,9 @@ func (s *Server) declarations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, declarationListResponse{Declarations: items, Page: page, PageSize: pageSize, Total: total, TotalPages: pages(total, pageSize)})
 }
 
-const declarationV3SourceSQL = `mfds_declaration_details JOIN (SELECT id AS declaration_id, ingredient_percent_raw, ingredient_percent, variant_marker_raw, variant_marker_type, variant_marker_value, alcohol_candidate_1_id, alcohol_candidate_1_score, alcohol_candidate_2_id, alcohol_candidate_2_score, alcohol_candidate_3_id, alcohol_candidate_3_score, selected_alcohol_id, distillery_candidate_1_id, distillery_candidate_1_score, distillery_candidate_2_id, distillery_candidate_2_score, distillery_candidate_3_id, distillery_candidate_3_score, selected_distillery_id, region_candidate_1_id, region_candidate_1_score, region_candidate_2_id, region_candidate_2_score, region_candidate_3_id, region_candidate_3_score, selected_region_id, matching_version, matching_run_id, alcohol_match_decision, distillery_match_source, region_match_source, matched_at FROM mfds_declarations) AS declaration_v3 ON declaration_v3.declaration_id = mfds_declaration_details.id`
+const declarationV3BaseSourceSQL = `mfds_declaration_details AS declaration_v3`
+
+const declarationV3SourceSQL = declarationV3BaseSourceSQL + ` LEFT JOIN mfds_importers AS linked_importer ON linked_importer.id = declaration_v3.importer_id`
 
 const declarationMatchingSourceSQL = declarationV3SourceSQL + `
 LEFT JOIN alcohols AS alcohol_candidate_1 ON alcohol_candidate_1.id = declaration_v3.alcohol_candidate_1_id
@@ -67,14 +78,14 @@ LEFT JOIN regions AS region_candidate_1 ON region_candidate_1.id = declaration_v
 LEFT JOIN regions AS region_candidate_2 ON region_candidate_2.id = declaration_v3.region_candidate_2_id
 LEFT JOIN regions AS region_candidate_3 ON region_candidate_3.id = declaration_v3.region_candidate_3_id`
 
-const declarationListSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, source_product_name_en, ''), COALESCE(sku_display_name_ko, sku_display_name_en, ''), COALESCE(base_product_name_ko, base_product_name_en, ''), COALESCE(CONCAT(unit_volume_ml, ' mL'), ''), CONCAT_WS(' · ', NULLIF(CONCAT(age_years, '년'), '년'), NULLIF(CAST(vintage_year AS CHAR), ''), NULLIF(CONCAT(abv_percent, '%'), '%'), NULLIF(CONCAT(proof_value, ' proof'), ' proof'), NULLIF(strength_type, ''), NULLIF(version_marker, ''), NULLIF(edition_name, ''), NULLIF(declaration_v3.variant_marker_raw, ''), NULLIF(declaration_v3.variant_marker_type, ''), NULLIF(material_code, ''), NULLIF(cask_number, ''), NULLIF(batch_number, '')), normalization_status, COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), declaration_v3.alcohol_candidate_1_id IS NOT NULL, declaration_v3.distillery_candidate_1_id IS NOT NULL, declaration_v3.region_candidate_1_id IS NOT NULL, CAST(normalization_reasons AS CHAR) FROM ` + declarationV3SourceSQL
+const declarationListSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, source_product_name_en, ''), COALESCE(sku_display_name_ko, sku_display_name_en, ''), COALESCE(base_product_name_ko, base_product_name_en, ''), COALESCE(CONCAT(unit_volume_ml, ' mL'), ''), CONCAT_WS(' · ', NULLIF(CONCAT(age_years, '년'), '년'), NULLIF(CAST(vintage_year AS CHAR), ''), NULLIF(CONCAT(abv_percent, '%'), '%'), NULLIF(CONCAT(proof_value, ' proof'), ' proof'), NULLIF(strength_type, ''), NULLIF(version_marker, ''), NULLIF(edition_name, ''), NULLIF(declaration_v3.variant_marker_raw, ''), NULLIF(declaration_v3.variant_marker_type, ''), NULLIF(material_code, ''), NULLIF(cask_number, ''), NULLIF(batch_number, '')), normalization_status, COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_importer_name, ''), COALESCE(declaration_v3.importer_id, 0), COALESCE(linked_importer.business_name, ''), declaration_v3.importer_id IS NOT NULL, COALESCE(declaration_v3.importer_link_source, ''), COALESCE(source_manufacture_country_name, ''), declaration_v3.alcohol_candidate_1_id IS NOT NULL, declaration_v3.distillery_candidate_1_id IS NOT NULL, declaration_v3.region_candidate_1_id IS NOT NULL, CAST(normalization_reasons AS CHAR) FROM ` + declarationV3SourceSQL
 
 func (f declarationFilter) where() (string, []any) {
 	clauses, args := []string{}, []any{}
 	if f.Search != "" {
-		clauses = append(clauses, "(rcno LIKE ? OR COALESCE(source_product_name_ko, source_item_name, source_product_name_en, '') LIKE ? OR COALESCE(sku_display_name_ko, sku_display_name_en, base_product_name_ko, base_product_name_en, '') LIKE ?)")
-		needle := "%" + f.Search + "%"
-		args = append(args, needle, needle, needle)
+		clauses = append(clauses, "(rcno LIKE ? ESCAPE '=' OR COALESCE(source_product_name_ko, source_item_name, source_product_name_en, '') LIKE ? ESCAPE '=' OR COALESCE(sku_display_name_ko, sku_display_name_en, base_product_name_ko, base_product_name_en, '') LIKE ? ESCAPE '=' OR COALESCE(source_importer_name, '') LIKE ? ESCAPE '=' OR COALESCE(linked_importer.business_name, '') LIKE ? ESCAPE '=')")
+		needle := containsLikePattern(f.Search)
+		args = append(args, needle, needle, needle, needle, needle)
 	}
 	for _, pair := range []struct{ value, column string }{{f.Status, "normalization_status"}, {f.ItemName, "source_queried_item_name"}, {f.Importer, "COALESCE(importer_base_name, source_importer_name)"}, {f.Country, "source_manufacture_country_name"}} {
 		if pair.value != "" {
@@ -83,6 +94,21 @@ func (f declarationFilter) where() (string, []any) {
 	}
 	if f.Reason != "" {
 		clauses, args = append(clauses, "JSON_CONTAINS(normalization_reasons, JSON_QUOTE(?))"), append(args, f.Reason)
+	}
+	switch f.ImporterLink {
+	case "matched":
+		clauses = append(clauses, "declaration_v3.importer_id IS NOT NULL")
+	case "unlinked":
+		clauses = append(clauses, "declaration_v3.importer_id IS NULL")
+	}
+	if f.ImporterID > 0 {
+		clauses, args = append(clauses, "declaration_v3.importer_id = ?"), append(args, f.ImporterID)
+	}
+	if f.ProcessedFrom != "" {
+		clauses, args = append(clauses, "source_processed_date >= ?"), append(args, f.ProcessedFrom)
+	}
+	if f.ProcessedTo != "" {
+		clauses, args = append(clauses, "source_processed_date <= ?"), append(args, f.ProcessedTo)
 	}
 	for _, pair := range []struct{ value, column string }{
 		{f.AlcoholMatch, "declaration_v3.alcohol_candidate_1_id"},
@@ -127,11 +153,21 @@ func parseListRequest(values url.Values) (declarationFilter, int, int, error) {
 		Importer:        strings.TrimSpace(values.Get("importer")),
 		Country:         strings.TrimSpace(values.Get("country")),
 		Reason:          strings.TrimSpace(values.Get("reason")),
+		ImporterLink:    strings.TrimSpace(values.Get("importer_link")),
+		ProcessedFrom:   strings.TrimSpace(values.Get("from")),
+		ProcessedTo:     strings.TrimSpace(values.Get("to")),
 		AlcoholMatch:    strings.TrimSpace(values.Get("alcohol_match")),
 		DistilleryMatch: strings.TrimSpace(values.Get("distillery_match")),
 		RegionMatch:     strings.TrimSpace(values.Get("region_match")),
 		Sort:            strings.TrimSpace(values.Get("sort")),
 		Order:           strings.TrimSpace(values.Get("order")),
+	}
+	if raw := strings.TrimSpace(values.Get("importer_id")); raw != "" {
+		importerID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || importerID < 1 {
+			return declarationFilter{}, 0, 0, errors.New("invalid importer_id")
+		}
+		filter.ImporterID = importerID
 	}
 	if len([]rune(filter.Search)) > 200 {
 		return declarationFilter{}, 0, 0, errors.New("search must be 200 characters or fewer")
@@ -140,6 +176,19 @@ func parseListRequest(values url.Values) (declarationFilter, int, int, error) {
 		if value != "" && value != "matched" && value != "unmatched" {
 			return declarationFilter{}, 0, 0, errors.New("match filter must be matched or unmatched")
 		}
+	}
+	if filter.ImporterLink != "" && filter.ImporterLink != "matched" && filter.ImporterLink != "unlinked" {
+		return declarationFilter{}, 0, 0, errors.New("importer_link must be matched or unlinked")
+	}
+	for _, value := range []string{filter.ProcessedFrom, filter.ProcessedTo} {
+		if value != "" {
+			if _, err := time.Parse("2006-01-02", value); err != nil {
+				return declarationFilter{}, 0, 0, errors.New("date filter must use YYYY-MM-DD")
+			}
+		}
+	}
+	if filter.ProcessedFrom != "" && filter.ProcessedTo != "" && filter.ProcessedFrom > filter.ProcessedTo {
+		return declarationFilter{}, 0, 0, errors.New("from must be before or equal to to")
 	}
 	if filter.Sort == "" {
 		filter.Sort = "processed_at"
@@ -187,7 +236,7 @@ func (s *Server) declaration(w http.ResponseWriter, r *http.Request) {
 	var detail declarationDetail
 	var reasons, fragments string
 	var volumeRaw, volume, abvRaw, abv, ingredientRaw, ingredient, ageRaw, age, vintageRaw, vintage, edition, variantRaw, variantType, variantValue, lot, batch, importer, establishment string
-	if err := rows.Scan(&detail.RCNO, &detail.SourceName, &detail.SourceNameEnglish, &detail.NormalizedName, &detail.NormalizedNameEnglish, &detail.Status, &reasons, &fragments, &detail.ProcessedAt, &detail.ItemName, &detail.ImporterName, &detail.Country, &volumeRaw, &volume, &abvRaw, &abv, &ingredientRaw, &ingredient, &ageRaw, &age, &vintageRaw, &vintage, &edition, &variantRaw, &variantType, &variantValue, &lot, &batch, &importer, &establishment); err != nil {
+	if err := rows.Scan(&detail.RCNO, &detail.SourceName, &detail.SourceNameEnglish, &detail.NormalizedName, &detail.NormalizedNameEnglish, &detail.Status, &reasons, &fragments, &detail.ProcessedAt, &detail.ItemName, &detail.ImporterName, &detail.SourceImporterName, &detail.ImporterID, &detail.ImporterBusinessName, &detail.ImporterLinked, &detail.ImporterLinkSource, &detail.Country, &volumeRaw, &volume, &abvRaw, &abv, &ingredientRaw, &ingredient, &ageRaw, &age, &vintageRaw, &vintage, &edition, &variantRaw, &variantType, &variantValue, &lot, &batch, &importer, &establishment); err != nil {
 		writeDatabaseError(w, err)
 		return
 	}
@@ -307,7 +356,7 @@ func (s *Server) detailGroups(r *http.Request, rcno string) ([]detailGroup, erro
 	return groups, rows.Err()
 }
 
-const declarationDetailSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, ''), COALESCE(source_product_name_en, ''), COALESCE(sku_display_name_ko, base_product_name_ko, ''), COALESCE(sku_display_name_en, base_product_name_en, ''), normalization_status, CAST(normalization_reasons AS CHAR), CAST(unparsed_fragments_json AS CHAR), COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_manufacture_country_name, ''), COALESCE(volume_raw, ''), COALESCE(CONCAT(volume_ml, ' mL'), ''), COALESCE(abv_raw, ''), COALESCE(CONCAT(abv_percent, '%'), ''), COALESCE(declaration_v3.ingredient_percent_raw, ''), COALESCE(CONCAT(declaration_v3.ingredient_percent, '%'), ''), COALESCE(age_raw, ''), COALESCE(CONCAT(age_years, ' years'), ''), COALESCE(vintage_raw, ''), COALESCE(CAST(vintage_year AS CHAR), ''), COALESCE(edition_name, version_marker, ''), COALESCE(declaration_v3.variant_marker_raw, ''), COALESCE(declaration_v3.variant_marker_type, ''), COALESCE(declaration_v3.variant_marker_value, ''), COALESCE(lot_number, ''), COALESCE(batch_number, ''), COALESCE(importer_base_name, ''), COALESCE(overseas_establishment_search_key, '') FROM ` + declarationV3SourceSQL + ` WHERE rcno = ? LIMIT 1`
+const declarationDetailSQL = `SELECT rcno, COALESCE(source_product_name_ko, source_item_name, ''), COALESCE(source_product_name_en, ''), COALESCE(sku_display_name_ko, base_product_name_ko, ''), COALESCE(sku_display_name_en, base_product_name_en, ''), normalization_status, CAST(normalization_reasons AS CHAR), CAST(unparsed_fragments_json AS CHAR), COALESCE(DATE_FORMAT(source_processed_date, '%Y-%m-%d'), ''), COALESCE(source_queried_item_name, source_product_division_name, ''), COALESCE(importer_base_name, source_importer_name, ''), COALESCE(source_importer_name, ''), COALESCE(declaration_v3.importer_id, 0), COALESCE(linked_importer.business_name, ''), declaration_v3.importer_id IS NOT NULL, COALESCE(declaration_v3.importer_link_source, ''), COALESCE(source_manufacture_country_name, ''), COALESCE(volume_raw, ''), COALESCE(CONCAT(volume_ml, ' mL'), ''), COALESCE(abv_raw, ''), COALESCE(CONCAT(abv_percent, '%'), ''), COALESCE(declaration_v3.ingredient_percent_raw, ''), COALESCE(CONCAT(declaration_v3.ingredient_percent, '%'), ''), COALESCE(age_raw, ''), COALESCE(CONCAT(age_years, ' years'), ''), COALESCE(vintage_raw, ''), COALESCE(CAST(vintage_year AS CHAR), ''), COALESCE(edition_name, version_marker, ''), COALESCE(declaration_v3.variant_marker_raw, ''), COALESCE(declaration_v3.variant_marker_type, ''), COALESCE(declaration_v3.variant_marker_value, ''), COALESCE(lot_number, ''), COALESCE(batch_number, ''), COALESCE(importer_base_name, ''), COALESCE(overseas_establishment_search_key, '') FROM ` + declarationV3SourceSQL + ` WHERE rcno = ? LIMIT 1`
 
 func normalizationEvidence(reasons, fragments []string, fields []evidenceItem) []evidenceItem {
 	evidence := make([]evidenceItem, 0, len(reasons)+len(fragments)+len(fields))
