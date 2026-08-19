@@ -128,7 +128,7 @@ var detailColumns = []detailColumn{
 	{"정제 이력", "COALESCE(DATE_FORMAT(normalized_at, '%Y-%m-%d %H:%i'), '')", "정제 실행 시각", "이 건을 마지막으로 정제한 시각입니다."},
 	{"정제 이력", "COALESCE(LEFT(HEX(sku_candidate_key_sha256), 12), '')", "같은 제품 묶음 코드", "제품 이름과 병 용량 등이 같은 건끼리 붙는 코드입니다. 같은 코드끼리는 같은 제품일 가능성이 있다는 뜻이지 확정은 아닙니다."},
 	{"정제 이력", "COALESCE(review_status, '')", "확인 상태", "사람이 이 건을 확인했는지 여부입니다."},
-	{"정제 이력", "COALESCE(reviewed_by, '')", "확인한 사람", "이 건을 확인한 담당자입니다."},
-	{"정제 이력", "COALESCE(DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i'), '')", "확인 시각", "사람이 이 건을 확인한 시각입니다."},
+	{"정제 이력", "COALESCE(declaration_v3.reviewed_by, '')", "확인한 사람", "이 건을 확인한 담당자입니다."},
+	{"정제 이력", "COALESCE(DATE_FORMAT(declaration_v3.reviewed_at, '%Y-%m-%d %H:%i'), '')", "확인 시각", "사람이 이 건을 확인한 시각입니다."},
 	{"정제 이력", "COALESCE(review_note, '')", "확인 메모", "확인하면서 남긴 메모입니다."},
 }
