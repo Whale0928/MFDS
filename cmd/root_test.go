@@ -143,8 +143,11 @@ func writeCLIConfig(t *testing.T) (string, string) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	envFile := filepath.Join(dir, config.DefaultEnvFile)
+	if err := os.MkdirAll(filepath.Dir(envFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	configFile := filepath.Join(dataDir, "config.yaml")
-	envFile := filepath.Join(dir, ".env.local")
 	yaml := `
 timezone: Asia/Seoul
 web:
