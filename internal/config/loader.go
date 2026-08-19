@@ -80,8 +80,7 @@ func loadEnvFile(path string) (func(), error) {
 
 func bindEnvironment(v *viper.Viper) {
 	bindings := map[string][]string{
-		"database.dsn":            {"MYSQL_DSN"},
-		"foodsafetykorea.api_key": {"FOODSAFETYKOREA_API_KEY"},
+		"database.dsn": {"MYSQL_DSN"},
 	}
 	for key, names := range bindings {
 		_ = v.BindEnv(append([]string{key}, names...)...)

@@ -155,13 +155,6 @@ web:
   list_page_size: 50
   list_workers: 2
   qps: 1
-foodsafetykorea:
-  base_url: https://openapi.foodsafetykorea.go.kr
-  page_size: 1000
-  max_pages: 500
-  max_requests_per_run: 500
-  qps: 0.5
-  request_timeout: 30s
 database:
   max_open_conns: 10
   max_idle_conns: 5
@@ -181,7 +174,7 @@ targets:
   - {name: 일반증류주, code: C0314230000000000000}
   - {name: 리큐르, code: C0314240000000000000}
 `
-	env := "MYSQL_DSN=test:test@tcp(localhost:3306)/test\nFOODSAFETYKOREA_API_KEY=test-foodsafety-key\n"
+	env := "MYSQL_DSN=test:test@tcp(localhost:3306)/test\n"
 	if err := os.WriteFile(configFile, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
