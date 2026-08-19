@@ -41,15 +41,14 @@ func parseExpiry(raw string, state *derivationState) {
 func parseCompany(importer, overseas string, state *derivationState) {
 	trimmed := strings.TrimSpace(importer)
 	if trimmed != "" {
+		state.result.ImporterBaseName = trimmed
+		state.result.ImporterSearchKey = searchKey(trimmed)
 		for _, legal := range []string{"주식회사", "유한회사", "(주)", "㈜"} {
 			if strings.HasPrefix(trimmed, legal) {
 				state.result.LegalEntityType = legal
-				trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, legal))
 				break
 			}
 		}
-		state.result.ImporterBaseName = trimmed
-		state.result.ImporterSearchKey = searchKey(trimmed)
 	}
 	state.result.ManufacturerName = overseas
 	state.result.OverseasEstablishmentSearchKey = searchKey(overseas)

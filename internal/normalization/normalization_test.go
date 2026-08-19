@@ -238,11 +238,12 @@ func TestNormalize_이름과업체명은원문보존형으로파생한다(t *tes
 	result := Normalize(Input{
 		ProductNameKO:             "일반 위스키-700ML",
 		ProductNameEN:             "PLAIN WHISKY",
-		ImporterName:              "주식회사 보틀노트",
+		ImporterName:              "  주식회사 호수무역  ",
 		OverseasEstablishmentName: "O’Connor Distillery",
 	})
 	if result.Status != StatusNormalized || result.SKUDisplayNameKO != "일반 위스키-700ml" ||
-		result.ImporterBaseName != "보틀노트" || result.LegalEntityType != "주식회사" ||
+		result.ImporterBaseName != "주식회사 호수무역" || result.ImporterSearchKey != "주식회사 호수무역" ||
+		result.LegalEntityType != "주식회사" ||
 		result.ManufacturerName != "O’Connor Distillery" ||
 		result.OverseasEstablishmentSearchKey != "o'connor distillery" {
 		t.Fatalf("result = %+v", result)
