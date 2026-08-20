@@ -102,6 +102,50 @@ func (s *Scraper) Detail(ctx context.Context, internalBusinessCode string) (Busi
 	return detail, nil
 }
 
+func (s *Scraper) SearchGallery(ctx context.Context, request GallerySearchRequest) (GalleryPage, error) {
+	if err := validateGallerySearchRequest(request); err != nil {
+		return GalleryPage{}, err
+	}
+	query := url.Values{
+		"page":          {strconv.Itoa(request.Page)},
+		"limit":         {strconv.Itoa(request.Limit)},
+		"totalCnt":      {"0"},
+		"bsshNm":        {request.BusinessName},
+		"rceptBeginDtm": {request.FromDate.Format(time.DateOnly)},
+		"rceptEndDtm":   {request.ToDate.Format(time.DateOnly)},
+	}
+	body, source, err := s.fetchHTML(ctx, GalleryListPath, query)
+	if err != nil {
+		return GalleryPage{}, err
+	}
+	page, err := parseGalleryPage(body, request)
+	if err != nil {
+		return GalleryPage{}, err
+	}
+	page.Source = source
+	return page, nil
+}
+
+func (s *Scraper) GalleryDetail(ctx context.Context, productCode string) (GalleryDetail, error) {
+	productCode = strings.TrimSpace(productCode)
+	if productCode == "" {
+		return GalleryDetail{}, errors.New("갤러리 제품코드가 필요합니다")
+	}
+	body, source, err := s.fetchHTML(ctx, GalleryDetailPath, url.Values{
+		"prductCd": {productCode},
+		"appPopup": {"Y"},
+	})
+	if err != nil {
+		return GalleryDetail{}, err
+	}
+	detail, err := parseGalleryDetail(body, productCode)
+	if err != nil {
+		return GalleryDetail{}, err
+	}
+	detail.Source = source
+	return detail, nil
+}
+
 func (s *Scraper) fetchHTML(ctx context.Context, path string, query url.Values) ([]byte, SourceMetadata, error) {
 	target := s.baseURL.ResolveReference(&url.URL{Path: path})
 	target.RawQuery = query.Encode()
@@ -170,6 +214,22 @@ func validateSearchRequest(request SearchRequest) error {
 	if strings.TrimSpace(request.BusinessName) != request.BusinessName ||
 		strings.TrimSpace(request.OperatingState) != request.OperatingState {
 		return errors.New("검색 조건은 앞뒤 공백을 포함할 수 없습니다")
+	}
+	return nil
+}
+
+func validateGallerySearchRequest(request GallerySearchRequest) error {
+	if request.Page < 1 {
+		return errors.New("page는 1 이상이어야 합니다")
+	}
+	if request.Limit < 1 || request.Limit > MaximumPageSize {
+		return fmt.Errorf("limit은 1 이상 %d 이하여야 합니다", MaximumPageSize)
+	}
+	if strings.TrimSpace(request.BusinessName) == "" || strings.TrimSpace(request.BusinessName) != request.BusinessName {
+		return errors.New("갤러리 수입업체명이 필요하며 앞뒤 공백을 포함할 수 없습니다")
+	}
+	if request.FromDate.IsZero() || request.ToDate.IsZero() || request.FromDate.After(request.ToDate) {
+		return errors.New("갤러리 조회 기간이 유효하지 않습니다")
 	}
 	return nil
 }

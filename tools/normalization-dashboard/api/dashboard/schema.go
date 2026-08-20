@@ -9,7 +9,7 @@ const requiredSchemaSQL = `SELECT
 	(SELECT COUNT(*) FROM information_schema.tables
 	 WHERE table_schema = DATABASE()
 	   AND table_name IN (
-		'mfds_importers', 'mfds_missing_importers'
+		'mfds_importers', 'mfds_importer_rcno_links'
 	)),
 	(SELECT COUNT(*) FROM information_schema.columns
 	 WHERE table_schema = DATABASE() AND table_name = 'mfds_declarations'
@@ -18,7 +18,7 @@ const requiredSchemaSQL = `SELECT
 	 WHERE table_schema = DATABASE() AND table_name = 'mfds_declaration_details'
 	   AND column_name IN ('importer_id', 'importer_link_source'))`
 
-// ValidateRequiredSchema fails before serving requests when Flyway V12 is incomplete.
+// ValidateRequiredSchema fails before serving requests when the importer schema is incomplete.
 func ValidateRequiredSchema(ctx context.Context, queryer Queryer) error {
 	rows, err := queryer.QueryContext(ctx, requiredSchemaSQL)
 	if err != nil {

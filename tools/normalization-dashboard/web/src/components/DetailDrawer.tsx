@@ -29,8 +29,8 @@ export function DetailDrawer({ declaration, onClose, onOpenImporter }: { declara
         <section className={`drawer__importer-link${declaration.importer_linked ? ' is-linked' : ''}`} aria-label="정제 수입사 연결">
           <div><span>원장 수입사</span><strong>{declaration.source_importer_name || declaration.importer_name || '원문 없음'}</strong></div>
           {declaration.importer_linked && declaration.importer_id && declaration.importer_business_name
-            ? <><i aria-hidden="true">↔</i><div><span>정제 수입사</span><strong>{declaration.importer_business_name}</strong><small>ID {declaration.importer_id} · {declaration.importer_link_source === 'ADMIN' ? '관리자 확정' : '상호 exact 자동 연결'}</small></div><button type="button" onClick={() => onOpenImporter?.(declaration.importer_id!, declaration.importer_business_name!)}>수입사 모든 정보 보기</button></>
-            : <><i aria-hidden="true">—</i><div><span>정제 수입사</span><strong>연결되지 않음</strong><small>공식 업체 상호와 완전히 일치하지 않았습니다.</small></div></>}
+            ? <><i aria-hidden="true">↔</i><div><span>정제 수입사</span><strong>{declaration.importer_business_name}</strong><small>ID {declaration.importer_id} · {declaration.importer_link_source === 'PAGE_RCNO' ? '수입신고번호 공식 확인' : '공식 상호 단일 후보'}</small></div><button type="button" onClick={() => onOpenImporter?.(declaration.importer_id!, declaration.importer_business_name!)}>수입사 모든 정보 보기</button></>
+            : <><i aria-hidden="true">—</i><div><span>정제 수입사</span><strong>연결되지 않음</strong><small>공식 페이지에서 수입사를 확정할 근거가 없습니다.</small></div></>}
         </section>
 
         {reasons.length > 0 && <details className="drawer__reasons">

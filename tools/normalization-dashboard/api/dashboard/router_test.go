@@ -140,7 +140,7 @@ func TestImporterLedger_internalPaginationAndLinkSource(t *testing.T) {
 			return &fakeRows{values: [][]any{{true, int64(12)}}}, nil
 		}
 		if strings.Contains(query, "SELECT rcno") {
-			return &fakeRows{values: [][]any{{"RCNO-1", "원문", "EN", "2026-08-01", "위스키", "증류소", "영국", "700 mL", "40%", "AUTO"}}}, nil
+			return &fakeRows{values: [][]any{{"RCNO-1", "원문", "EN", "2026-08-01", "위스키", "증류소", "영국", "700 mL", "40%", "PAGE_NAME"}}}, nil
 		}
 		return nil, fmt.Errorf("unexpected query: %s", query)
 	}}
@@ -154,53 +154,8 @@ func TestImporterLedger_internalPaginationAndLinkSource(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Total != 12 || body.Page != 2 || body.Declarations[0].LinkSource != "AUTO" {
+	if body.Total != 12 || body.Page != 2 || body.Declarations[0].LinkSource != "PAGE_NAME" {
 		t.Fatalf("unexpected ledger page: %#v", body)
-	}
-}
-
-func TestMissingImporters_listAndDetailExposeCandidatesAndAdminFields(t *testing.T) {
-	row := []any{int64(3), "없는 수입사", "NAME-HASH", "AMBIGUOUS", int64(2), `[{"id":1}]`, int64(5), "RCNO-3", "2023-01-01", "2026-08-01", "https://source", "LIST-HASH", "2026-08-02T10:00:00", "설명", "메모", "OPEN", int64(0), "", "", "reviewer", "2026-08-03T10:00:00", "2023-01-01T10:00:00", "2026-08-03T10:00:00"}
-	queryer := &fakeQueryer{respond: func(query string, args []any) (RowIterator, error) {
-		if strings.HasPrefix(query, "SELECT COUNT(*) FROM mfds_missing_importers") {
-			return &fakeRows{values: [][]any{{int64(1)}}}, nil
-		}
-		if strings.Contains(query, "SELECT missing.id") {
-			return &fakeRows{values: [][]any{row}}, nil
-		}
-		return nil, fmt.Errorf("unexpected query: %s args=%#v", query, args)
-	}}
-	for name, target := range map[string]string{
-		"list":   "/api/missing-importers?match_status=AMBIGUOUS&page=1&page_size=20",
-		"detail": "/api/missing-importers/detail?missing_importer_id=3",
-	} {
-		t.Run(name, func(t *testing.T) {
-			response := httptest.NewRecorder()
-			NewServer(queryer).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
-			if response.Code != http.StatusOK {
-				t.Fatalf("status = %d: %s", response.Code, response.Body.String())
-			}
-			var value any
-			if err := json.NewDecoder(response.Body).Decode(&value); err != nil {
-				t.Fatal(err)
-			}
-			text, _ := json.Marshal(value)
-			for _, expected := range []string{`"source_importer_name":"없는 수입사"`, `"source_name_key_sha256":"NAME-HASH"`, `"match_status":"AMBIGUOUS"`, `"candidates":[{"id":1}]`, `"source_list_sha256":"LIST-HASH"`, `"admin_note":"메모"`} {
-				if !strings.Contains(string(text), expected) {
-					t.Fatalf("missing %s in %s", expected, text)
-				}
-			}
-		})
-	}
-	var listQuery string
-	for _, query := range queryer.queries {
-		if strings.Contains(query, "SELECT missing.id") && strings.Contains(query, "ORDER BY missing.updated_at") {
-			listQuery = query
-		}
-	}
-	if !strings.Contains(listQuery, "WHERE 1 = 1 AND missing.match_status = ?") ||
-		strings.Index(listQuery, "WHERE 1 = 1") < strings.Index(listQuery, "LEFT JOIN mfds_importers") {
-		t.Fatalf("missing importer filters are not in a WHERE clause: %s", listQuery)
 	}
 }
 
@@ -210,13 +165,13 @@ func TestDeclarations_exposesImporterLinkSource(t *testing.T) {
 			return &fakeRows{values: [][]any{{int64(1)}}}, nil
 		}
 		if strings.Contains(query, "FROM mfds_declaration_details") {
-			return &fakeRows{values: [][]any{{"RCNO-1", "원본", "정제", "700 mL", "40%", "", "NORMALIZED", "2026-08-01", "위스키", "정제 수입사", "원장 수입사", int64(7), "정제 수입사", true, "ADMIN", "영국", true, false, true, `[]`}}}, nil
+			return &fakeRows{values: [][]any{{"RCNO-1", "원본", "정제", "700 mL", "40%", "", "NORMALIZED", "2026-08-01", "위스키", "정제 수입사", "원장 수입사", int64(7), "정제 수입사", true, "PAGE_RCNO", "영국", true, false, true, `[]`}}}, nil
 		}
 		return nil, fmt.Errorf("unexpected query: %s args=%#v", query, args)
 	}}
 	response := httptest.NewRecorder()
 	NewServer(queryer).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/declarations?page=1&page_size=20", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"importer_link_source":"ADMIN"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"importer_link_source":"PAGE_RCNO"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
@@ -240,7 +195,7 @@ func TestValidateRequiredSchema_requiresImporterTablesDeclarationAndDetailViewCo
 }
 
 func TestDashboardImporterQueries_haveNoWriteOperations(t *testing.T) {
-	queries := []string{importerBaseCTE, importerListSQL, importerProfileSQL, importerStatisticsSQL, importerProductGroupSQL, importerLedgerListSQL, missingImporterSelectSQL, requiredSchemaSQL}
+	queries := []string{importerBaseCTE, importerListSQL, importerProfileSQL, importerStatisticsSQL, importerProductGroupSQL, importerLedgerListSQL, requiredSchemaSQL}
 	for _, query := range queries {
 		upper := strings.ToUpper(query)
 		for _, forbidden := range []string{"INSERT ", "UPDATE ", "DELETE ", "REPLACE ", "MFDS_IMPORTER_LICENSES", "MFDS_IMPORTER_EVIDENCE", "MFDS_C001_IMPORTER_LICENSES_RAW", "MFDS_I2821_IMPORTER_CLOSURES_RAW", "MFDS_I0250_EXCELLENT_IMPORTERS_RAW", "MFDS_I0470_ADMINISTRATIVE_DISPOSITIONS_RAW"} {

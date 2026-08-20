@@ -1,7 +1,7 @@
-import { type FormEvent, useEffect, useId, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import { api } from '../api'
 import { number } from '../format'
-import type { ImporterDetail as ImporterDetailData, ImporterGroup, ImporterLedgerPage, ImporterPage, ImporterProductGroup, ImporterProductPage, ImporterProfile, MissingImporter, MissingImporterPage } from '../types'
+import type { ImporterDetail as ImporterDetailData, ImporterGroup, ImporterLedgerPage, ImporterPage, ImporterProductGroup, ImporterProductPage, ImporterProfile } from '../types'
 
 const PAGE_SIZE = 20
 const LEDGER_PAGE_SIZE = 10
@@ -48,11 +48,11 @@ export function ImporterList({ onOpenImporter }: { onOpenImporter: (importer: Im
   return <div className="page importer-page">
     <div className="page-title importer-page__title">
       <div><p className="eyebrow">OFFICIAL IMPORTER REGISTER</p><h1>수입사 목록</h1></div>
-      <p>공식 화면에서 exact 단일 결과로 확정된 수입사와 제품별 수입 원장을 확인합니다.</p>
+      <p>공식 국내업소 화면과 수입신고번호 근거로 확정된 수입사와 제품별 수입 원장을 확인합니다.</p>
     </div>
     <section className="importer-register-note" aria-label="수입사 목록 기준">
-      <div><span>목록 기준</span><strong>공식 exact 단일 수입사 하나당 한 줄</strong></div>
-      <p>원장 상호와 앞뒤 공백을 제외한 공식 상호가 완전히 같고 후보가 한 건일 때만 확정합니다. 0건과 복수 후보는 미매칭 관리 목록으로 분리합니다.</p>
+      <div><span>목록 기준</span><strong>공식 업소 식별코드 하나당 한 줄</strong></div>
+		<p>원장 상호의 공식 후보가 한 건이면 바로 연결하고, 복수 후보는 수입신고번호(RCNO)가 확인되는 공식 제품 상세로 정확한 업소를 확정합니다.</p>
 		<span className="importer-source">수입식품정보마루 국내업소 공식 화면</span>
     </section>
     <form className="importer-search" onSubmit={search}>
@@ -72,90 +72,6 @@ export function ImporterList({ onOpenImporter }: { onOpenImporter: (importer: Im
     </>}
   </div>
 }
-
-export function MissingImporterQueue() {
-  const [input, setInput] = useState('')
-  const [query, setQuery] = useState('')
-  const [matchStatus, setMatchStatus] = useState<'' | 'MISSING' | 'AMBIGUOUS'>('')
-  const [adminStatus, setAdminStatus] = useState<'OPEN' | 'RESOLVED' | 'DISMISSED'>('OPEN')
-  const [page, setPage] = useState(1)
-  const [data, setData] = useState<MissingImporterPage | null>(null)
-  const [selected, setSelected] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    setLoading(true)
-    api.missingImporters({ page, page_size: PAGE_SIZE, q: query || undefined, match_status: matchStatus || undefined, admin_status: adminStatus })
-      .then((result) => { if (alive) { setData(result); setError(null) } })
-      .catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [page, query, matchStatus, adminStatus])
-
-  const search = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); setPage(1); setQuery(input.trim()) }
-  const totalPages = Math.max(1, data?.total_pages ?? 0)
-  return <div className="page importer-page missing-importer-page">
-    <div className="page-title importer-page__title"><div><p className="eyebrow">ADMIN REVIEW QUEUE · READ ONLY</p><h1>미매칭 수입사</h1></div><p>공식 exact 후보가 없거나 여러 개인 원장 상호를 관리자 관리 대상으로 확인합니다. 이 화면에서는 값을 바꾸지 않습니다.</p></div>
-    <section className="missing-queue-note" aria-label="미매칭 수입사 안내"><strong>관리자 관리 대상</strong><span>MISSING · 공식 exact 후보 0건</span><span>AMBIGUOUS · 공식 exact 후보 복수</span><small>후보, 원장 통계, 설명과 관리 필드는 모두 읽기 전용입니다.</small></section>
-    <form className="importer-search missing-importer-search" onSubmit={search}>
-      <div className="importer-search__query"><label htmlFor="missing-importer-search">상호 검색</label><div><input id="missing-importer-search" value={input} onChange={(event) => setInput(event.target.value)} maxLength={200} placeholder="원장 상호 · RCNO · 설명" /><button type="submit">검색</button></div></div>
-      <label>매칭 상태<select value={matchStatus} onChange={(event) => { setMatchStatus(event.target.value as typeof matchStatus); setPage(1) }}><option value="">전체</option><option value="MISSING">MISSING</option><option value="AMBIGUOUS">AMBIGUOUS</option></select></label>
-      <label>관리 상태<select value={adminStatus} onChange={(event) => { setAdminStatus(event.target.value as typeof adminStatus); setPage(1) }}><option value="OPEN">OPEN</option><option value="RESOLVED">RESOLVED</option><option value="DISMISSED">DISMISSED</option></select></label>
-      <span aria-live="polite">{number(data?.total)}건</span>
-    </form>
-    {loading && <div className="state state--loading" role="status"><span />관리 대상 목록을 읽는 중</div>}
-    {error && <div className="state state--error" role="alert"><b>미매칭 수입사 목록을 조회할 수 없습니다.</b><span>{error}</span></div>}
-    {!loading && !error && data && <>
-      {data.missing_importers.length ? <section className="missing-importer-register" aria-label="미매칭 수입사 관리 대상 목록">
-        <div className="missing-importer-register__head"><span>원장 상호</span><span>판정</span><span>원장 통계</span><span>설명 · 관리</span><span>상세</span></div>
-        {data.missing_importers.map((item) => <button type="button" className="missing-importer-record" key={item.missing_importer_id} onClick={() => setSelected(item.missing_importer_id)}>
-          <span data-label="원장 상호"><strong>{item.source_importer_name}</strong><small>관리 대상 ID {item.missing_importer_id}</small></span>
-          <span data-label="판정"><StatusLabel value={item.match_status} /><small>{number(item.candidate_count)}개 후보</small></span>
-          <span data-label="원장 통계"><b>{number(item.declaration_count)}건</b><small>{item.first_processed_date || '—'} — {item.last_processed_date || '—'}</small><small>예시 {value(item.sample_rcno)}</small></span>
-          <span data-label="설명 · 관리"><b>{value(item.admin_status)}</b><small>{value(item.description)}</small><small>{value(item.admin_note)}</small></span>
-          <span className="importer-record__open" data-label="상세">후보 · 필드 보기 →</span>
-        </button>)}
-      </section> : <div className="empty-state"><h2>조건에 맞는 관리 대상이 없습니다.</h2><p>상호 검색 또는 상태 필터를 바꿔 다시 확인하세요.</p></div>}
-      <div className="pagination"><button disabled={page <= 1} onClick={() => setPage(page - 1)}>이전</button><span>{page} / {totalPages}</span><button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>다음</button></div>
-    </>}
-    {selected !== null && <MissingImporterDetailDrawer missingImporterID={selected} onClose={() => setSelected(null)} />}
-  </div>
-}
-
-function MissingImporterDetailDrawer({ missingImporterID, onClose }: { missingImporterID: number; onClose: () => void }) {
-  const titleID = useId()
-  const [data, setData] = useState<MissingImporter | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    api.missingImporter(missingImporterID).then((result) => { if (alive) { setData(result); setError(null) } }).catch((reason: unknown) => { if (alive) setError(errorMessage(reason)) })
-    return () => { alive = false }
-  }, [missingImporterID])
-  useEffect(() => { const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }; window.addEventListener('keydown', closeOnEscape); return () => window.removeEventListener('keydown', closeOnEscape) }, [onClose])
-  return <div className="missing-detail-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <aside className="missing-detail-drawer" role="dialog" aria-modal="true" aria-labelledby={titleID}>
-      <header><div><p className="eyebrow">ADMIN REVIEW QUEUE · READ ONLY</p><h2 id={titleID}>{data?.source_importer_name || '미매칭 수입사 상세'}</h2><span>관리자가 확인할 수 있지만 이 화면에서는 수정할 수 없습니다.</span></div><button type="button" onClick={onClose}>닫기</button></header>
-      {error && <div className="state state--error" role="alert"><b>상세를 조회할 수 없습니다.</b><span>{error}</span></div>}
-      {!data && !error && <div className="state state--loading" role="status"><span />관리 대상 상세를 읽는 중</div>}
-      {data && <div className="missing-detail-drawer__body">
-        <div className="missing-detail-status"><StatusLabel value={data.match_status} /><StatusLabel value={data.admin_status} /><span>{number(data.candidate_count)}개 후보 · {number(data.declaration_count)}건 원장</span></div>
-        <section><h3>후보</h3>{data.candidates.length ? <div className="missing-candidate-list">{data.candidates.map((candidate, index) => <article key={index}><strong>후보 {index + 1}</strong><dl>{candidateFields(candidate).map(([label, candidateValue]) => <div key={label}><dt>{label}</dt><dd>{candidateValue}</dd></div>)}</dl></article>)}</div> : <p className="empty-inline">공식 exact 후보가 없습니다.</p>}</section>
-        <section><h3>원장 통계</h3><dl className="missing-detail-fields"><div><dt>원장 건수</dt><dd>{number(data.declaration_count)}건</dd></div><div><dt>예시 RCNO</dt><dd>{value(data.sample_rcno)}</dd></div><div><dt>최초 처리일</dt><dd>{value(data.first_processed_date)}</dd></div><div><dt>최근 처리일</dt><dd>{value(data.last_processed_date)}</dd></div></dl></section>
-        <section><h3>설명과 관리 필드 · 읽기 전용</h3><dl className="missing-detail-fields"><div><dt>설명</dt><dd>{officialValue(data.description)}</dd></div><div><dt>관리자 메모</dt><dd>{officialValue(data.admin_note)}</dd></div><div><dt>관리 상태</dt><dd>{data.admin_status}</dd></div><div><dt>해결 수입사</dt><dd>{data.resolved_importer_business_name || (data.resolved_importer_id ? `ID ${data.resolved_importer_id}` : '미해결')}</dd></div><div><dt>해결 출처</dt><dd>{officialValue(data.resolution_source)}</dd></div><div><dt>검토자 · 시각</dt><dd>{[data.reviewed_by, displayObservedAt(data.reviewed_at)].filter(Boolean).join(' · ') || '미검토'}</dd></div></dl></section>
-        <section><h3>공식 관측</h3><dl className="missing-detail-fields"><div><dt>상호 exact key SHA-256</dt><dd>{officialValue(data.source_name_key_sha256)}</dd></div><div><dt>목록 URL</dt><dd>{officialValue(data.source_list_url)}</dd></div><div><dt>목록 SHA-256</dt><dd>{officialValue(data.source_list_sha256)}</dd></div><div><dt>관측 시각</dt><dd>{officialValue(displayObservedAt(data.source_observed_at))}</dd></div></dl></section>
-      </div>}
-    </aside>
-  </div>
-}
-
-function StatusLabel({ value: status }: { value: string }) { return <strong className={`missing-status missing-status--${status.toLowerCase()}`}>{status}</strong> }
-function candidateFields(candidate: Record<string, unknown>) {
-  const fields: Array<[string, string]> = [['업소 코드', candidateText(candidate, 'InternalBusinessCode', 'internal_business_code')], ['인허가번호', candidateText(candidate, 'LicenseNumber', 'license_number')], ['상호', candidateText(candidate, 'BusinessName', 'business_name')], ['대표자', candidateText(candidate, 'Representative', 'representative')], ['주소', candidateText(candidate, 'Address', 'address')], ['업종', candidateText(candidate, 'Industry', 'industry')], ['관할기관', candidateText(candidate, 'Institution', 'institution')], ['상세 URL', candidateText(candidate, 'DetailURL', 'detail_url')]]
-  return fields.filter(([, fieldValue]) => fieldValue)
-}
-function candidateText(candidate: Record<string, unknown>, ...keys: string[]) { for (const key of keys) { if (typeof candidate[key] === 'string' && candidate[key]) return candidate[key] as string }; return '' }
 
 function ImporterRegister({ importers, matchedOnly, onShowAll, onOpen }: { importers: ImporterGroup[]; matchedOnly: boolean; onShowAll: () => void; onOpen: (importer: ImporterGroup) => void }) {
   if (!importers.length) return <div className="empty-state"><h2>조건에 맞는 수입사가 없습니다.</h2><p>{matchedOnly ? '아직 원장 연결이 없거나 다른 필터 조건에 해당하지 않습니다.' : '검색어 또는 필터 조건을 바꿔 다시 확인하세요.'}</p>{matchedOnly && <button type="button" onClick={onShowAll}>원장 미연결 수입사도 보기</button>}</div>
@@ -198,7 +114,7 @@ export function ImporterDetailDialog({ importer, active = true, onClose, onOpenD
         {data && <>
           <ImporterDetailAccessNote profile={data.profile} />
           <section className="importer-profile__section" aria-labelledby="importer-profile-title">
-			<SectionHeading number="1" title="정제 수입사 프로필" description="공식 국내업소 화면에서 exact 단일 결과로 확정한 기준정보입니다." id="importer-profile-title" />
+			<SectionHeading number="1" title="정제 수입사 프로필" description="공식 국내업소 화면과 수입신고번호 근거로 확정한 기준정보입니다." id="importer-profile-title" />
             <ImporterProfileSummary profile={data.profile} />
           </section>
           <section className="importer-profile__section" aria-labelledby="importer-official-title">

@@ -19,8 +19,10 @@ func (e *HTTPStatusError) Error() string {
 }
 
 const (
-	ListPath   = "/CFCCC01F02/getList"
-	DetailPath = "/CFCCC01P01"
+	ListPath          = "/CFCCC01F02/getList"
+	DetailPath        = "/CFCCC01P01"
+	GalleryListPath   = "/CFCCC01F12/getList"
+	GalleryDetailPath = "/CFCCC01F13/getGalleryDetail"
 
 	DefaultUserAgent   = "bottle-note-mfds-company-scraper/1.0"
 	DefaultMaxBodySize = 2 << 20
@@ -50,6 +52,36 @@ type SearchPage struct {
 	TotalPages int
 	Rows       []SearchResult
 	Source     SourceMetadata
+}
+
+type GallerySearchRequest struct {
+	Page         int
+	Limit        int
+	BusinessName string
+	FromDate     time.Time
+	ToDate       time.Time
+}
+
+type GalleryPage struct {
+	Total      int
+	Page       int
+	Limit      int
+	TotalPages int
+	Products   []GalleryProduct
+	Source     SourceMetadata
+}
+
+type GalleryProduct struct {
+	ProductCode string
+	ProductName string
+}
+
+type GalleryDetail struct {
+	ProductCode          string
+	RCNO                 string
+	InternalBusinessCode string
+	BusinessName         string
+	Source               SourceMetadata
 }
 
 type SearchResult struct {

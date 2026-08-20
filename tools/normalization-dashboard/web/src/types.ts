@@ -35,7 +35,7 @@ export interface Declaration {
   importer_id?: number
   importer_business_name?: string
   importer_linked?: boolean
-  importer_link_source?: 'AUTO' | 'ADMIN' | string
+  importer_link_source?: 'PAGE_NAME' | 'PAGE_RCNO' | string
   country?: string
   alcohol_matched?: boolean
   distillery_matched?: boolean
@@ -219,48 +219,6 @@ export interface ImporterQuery {
   industry_name?: string
   sort?: 'business_name' | 'declarations' | 'last_import' | 'observed_at'
   order?: SortOrder
-}
-
-export interface MissingImporter {
-  missing_importer_id: number
-  source_importer_name: string
-  source_name_key_sha256: string
-  match_status: 'MISSING' | 'AMBIGUOUS' | string
-  candidate_count: number
-  candidates: Array<Record<string, unknown>>
-  declaration_count: number
-  sample_rcno: string
-  first_processed_date: string
-  last_processed_date: string
-  source_list_url: string
-  source_list_sha256: string
-  source_observed_at: string
-  description: string
-  admin_note: string
-  admin_status: 'OPEN' | 'RESOLVED' | 'DISMISSED' | string
-  resolved_importer_id: number
-  resolved_importer_business_name: string
-  resolution_source: string
-  reviewed_by: string
-  reviewed_at: string
-  created_at: string
-  updated_at: string
-}
-
-export interface MissingImporterPage {
-  missing_importers: MissingImporter[]
-  page: number
-  page_size: number
-  total: number
-  total_pages: number
-}
-
-export interface MissingImporterQuery {
-  page: number
-  page_size: number
-  q?: string
-  match_status?: 'MISSING' | 'AMBIGUOUS'
-  admin_status?: 'OPEN' | 'RESOLVED' | 'DISMISSED'
 }
 
 export interface Quality {

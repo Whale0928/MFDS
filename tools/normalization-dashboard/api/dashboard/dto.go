@@ -1,7 +1,5 @@
 package dashboard
 
-import "encoding/json"
-
 type statusCount struct {
 	Status string `json:"status"`
 	Count  int64  `json:"count"`
@@ -175,39 +173,6 @@ type importerLedgerPage struct {
 	TotalPages   int                  `json:"total_pages"`
 }
 
-type missingImporterListItem struct {
-	MissingImporterID            int64           `json:"missing_importer_id"`
-	SourceImporterName           string          `json:"source_importer_name"`
-	SourceNameKeySHA256          string          `json:"source_name_key_sha256"`
-	MatchStatus                  string          `json:"match_status"`
-	CandidateCount               int64           `json:"candidate_count"`
-	Candidates                   json.RawMessage `json:"candidates"`
-	DeclarationCount             int64           `json:"declaration_count"`
-	SampleRCNO                   string          `json:"sample_rcno"`
-	FirstProcessedDate           string          `json:"first_processed_date"`
-	LastProcessedDate            string          `json:"last_processed_date"`
-	SourceListURL                string          `json:"source_list_url"`
-	SourceListSHA256             string          `json:"source_list_sha256"`
-	SourceObservedAt             string          `json:"source_observed_at"`
-	Description                  string          `json:"description"`
-	AdminNote                    string          `json:"admin_note"`
-	AdminStatus                  string          `json:"admin_status"`
-	ResolvedImporterID           int64           `json:"resolved_importer_id"`
-	ResolvedImporterBusinessName string          `json:"resolved_importer_business_name"`
-	ResolutionSource             string          `json:"resolution_source"`
-	ReviewedBy                   string          `json:"reviewed_by"`
-	ReviewedAt                   string          `json:"reviewed_at"`
-	CreatedAt                    string          `json:"created_at"`
-	UpdatedAt                    string          `json:"updated_at"`
-}
-
-type missingImporterListResponse struct {
-	MissingImporters []missingImporterListItem `json:"missing_importers"`
-	Page             int                       `json:"page"`
-	PageSize         int                       `json:"page_size"`
-	Total            int64                     `json:"total"`
-	TotalPages       int                       `json:"total_pages"`
-}
 type declarationDetail struct {
 	RCNO                  string                    `json:"rcno"`
 	SourceName            string                    `json:"source_name"`

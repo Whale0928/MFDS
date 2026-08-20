@@ -2,6 +2,7 @@ package mfdscompany
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -14,6 +15,8 @@ import (
 
 var detailCodePattern = regexp.MustCompile(`fnDetailPopup1\(\s*['"]([^'"]+)['"]\s*\)`)
 var totalPattern = regexp.MustCompile(`총\s*([0-9][0-9,]*)\s*건`)
+var galleryProductPattern = regexp.MustCompile(`fnGalleryMobileDetail\(\s*['"]?([0-9]+)['"]?\s*\)`)
+var galleryParamPattern = regexp.MustCompile(`(?s)var\s+param\s*=\s*(\{.*?\})\s*;`)
 
 func parseSearchPage(body []byte, request SearchRequest) (SearchPage, error) {
 	document, err := html.Parse(bytes.NewReader(body))
@@ -110,6 +113,96 @@ func parseBusinessDetail(body []byte, internalCode string) (BusinessDetail, erro
 		return BusinessDetail{}, fmt.Errorf("상세 기본정보에 인허가번호 또는 업소명이 없습니다")
 	}
 	return detail, nil
+}
+
+func parseGalleryPage(body []byte, request GallerySearchRequest) (GalleryPage, error) {
+	document, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return GalleryPage{}, fmt.Errorf("갤러리 목록 HTML 해석: %w", err)
+	}
+	total, err := parseGalleryTotal(document)
+	if err != nil {
+		return GalleryPage{}, err
+	}
+	anchors := findElements(document, func(node *html.Node) bool {
+		return node.Data == "a" && galleryProductPattern.MatchString(attribute(node, "href"))
+	})
+	products := make([]GalleryProduct, 0, len(anchors))
+	seen := make(map[string]struct{}, len(anchors))
+	for _, anchor := range anchors {
+		match := galleryProductPattern.FindStringSubmatch(attribute(anchor, "href"))
+		if len(match) != 2 {
+			continue
+		}
+		code := strings.TrimSpace(match[1])
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		titles := findElements(anchor, func(node *html.Node) bool {
+			return node.Data == "strong" && hasClass(node, "title")
+		})
+		name := ""
+		if len(titles) == 1 {
+			name = normalizedText(titles[0])
+		}
+		products = append(products, GalleryProduct{ProductCode: code, ProductName: name})
+	}
+	expected := total - (request.Page-1)*request.Limit
+	if expected < 0 {
+		expected = 0
+	}
+	if expected > request.Limit {
+		expected = request.Limit
+	}
+	if len(products) != expected {
+		return GalleryPage{}, fmt.Errorf("갤러리 목록 결과 수가 정확하지 않습니다: expected=%d actual=%d", expected, len(products))
+	}
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + request.Limit - 1) / request.Limit
+	}
+	return GalleryPage{Total: total, Page: request.Page, Limit: request.Limit, TotalPages: totalPages, Products: products}, nil
+}
+
+func parseGalleryTotal(document *html.Node) (int, error) {
+	counts := findElements(document, func(node *html.Node) bool {
+		return node.Data == "div" && hasClass(node, "board_count") && totalPattern.MatchString(normalizedText(node))
+	})
+	if len(counts) == 0 {
+		return 0, fmt.Errorf("갤러리 total을 찾을 수 없습니다")
+	}
+	match := totalPattern.FindStringSubmatch(normalizedText(counts[0]))
+	total, err := strconv.Atoi(strings.ReplaceAll(match[1], ",", ""))
+	if err != nil || total < 0 {
+		return 0, fmt.Errorf("갤러리 total이 유효하지 않습니다: %q", match[1])
+	}
+	return total, nil
+}
+
+func parseGalleryDetail(body []byte, productCode string) (GalleryDetail, error) {
+	match := galleryParamPattern.FindSubmatch(body)
+	if len(match) != 2 {
+		return GalleryDetail{}, fmt.Errorf("갤러리 상세 param 데이터를 찾을 수 없습니다")
+	}
+	var payload struct {
+		RCNO                 string `json:"rcno"`
+		InternalBusinessCode string `json:"grpBsnLcnsLedgNo"`
+		BusinessName         string `json:"bsshNm"`
+	}
+	if err := json.Unmarshal(match[1], &payload); err != nil {
+		return GalleryDetail{}, fmt.Errorf("갤러리 상세 param JSON 해석: %w", err)
+	}
+	payload.RCNO = strings.TrimSpace(payload.RCNO)
+	payload.InternalBusinessCode = strings.TrimSpace(payload.InternalBusinessCode)
+	payload.BusinessName = strings.TrimSpace(payload.BusinessName)
+	if payload.RCNO == "" || payload.InternalBusinessCode == "" || payload.BusinessName == "" {
+		return GalleryDetail{}, fmt.Errorf("갤러리 상세에 RCNO, 내부업소코드 또는 업소명이 없습니다")
+	}
+	return GalleryDetail{
+		ProductCode: productCode, RCNO: payload.RCNO,
+		InternalBusinessCode: payload.InternalBusinessCode, BusinessName: payload.BusinessName,
+	}, nil
 }
 
 func parseSearchRow(row *html.Node) (SearchResult, error) {

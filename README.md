@@ -62,7 +62,7 @@ declaration, lease, or timestamp. States are `PENDING`, `STALE`, `NORMALIZED`,
 `PARTIAL`, `REVIEW_REQUIRED`, and `UNPARSED`. Source `mfds_items` are never updated
 or deleted.
 `--force` marks existing terminal declarations `STALE` once and re-normalizes up
-to `--limit` rows. Source data, prior derived values, administrator importer links,
+to `--limit` rows. Source data, prior derived values, official importer links,
 and manual matching choices remain until replacement results are stored. It cannot
 be combined with `--rcno` or `--dry-run`.
 `collect-recent` takes no arguments and append-only collects the seven calendar
@@ -95,29 +95,17 @@ by `task setup`. Flyway migrations live in
 `git.environment-variables/storage/db/migration`. MFDS-only sqlc schema, queries,
 and generated code live in `git.secrets`.
 
-V12 creates `mfds_importers` and `mfds_missing_importers`. It embeds a fixed seed
-from a sequential 2026-08-15 KST lookup of the ledger's 397 trade names on the
-official Imported Food Information Maru domestic-business pages: 368 unique exact
-matches become importers, while 21 multiple-candidate and 8 missing results enter
-the administrator queue. It never chooses the first candidate arbitrarily.
+V12 is the historical migration that introduced the importer seed. V13 removes
+the retired unmatched-importer queue and records official evidence in
+`mfds_importer_rcno_links`. The checksum of an already-applied V12 is not changed.
 
-Normalization links `mfds_declarations.importer_id` as `AUTO` only when the trimmed
-source `importer_name` has exactly one binary-exact official `business_name` match.
-Zero or multiple matches remain nullable and refresh declaration counts, sample
-RCNO, and dates in `mfds_missing_importers`. `ADMIN` links, source text,
-`importer_base_name`, and `importer_search_key` survive re-normalization.
-
-The command below regenerates the seed. It requires exactly 397 unique, nonblank
-input names, uses only exact official-screen results, validates both the JSON
-manifest and SQL, and inserts the generated section into V12.
-
-```bash
-go run ./tools/importer-seed \
-  --input importer-business-names.txt \
-  --manifest-output /tmp/mfds-importer-seed.json \
-  --sql-output /tmp/mfds-importer-seed.sql \
-  --migration-output git.environment-variables/storage/db/migration/V12__add_mfds_importers.sql
-```
+After a web-ledger job completes, the application sequentially resolves only the
+trade names whose RCNO has no evidence yet. One exact domestic-business candidate
+is stored and linked as `PAGE_NAME`. For multiple candidates, only a product
+gallery detail that exposes both the same RCNO and a matching domestic-business
+code is linked as `PAGE_RCNO`. No result or no matching RCNO evidence leaves
+`mfds_declarations.importer_id` NULL without creating a separate status or queue.
+The immutable source ledger and normalized importer text remain intact.
 
 ## Structure
 
@@ -128,12 +116,12 @@ internal/config/             YAML and database environment loading
 internal/source/mfdsweb/     HTTP client and HTML parser
 internal/source/mfdscompany/ official domestic-business HTML client/parser
 internal/usecase/weblist/    collection and RCNO reconciliation
+internal/usecase/importerresolution/ official-page RCNO importer resolution
 internal/normalization/      pure normalization rules and parsers
 internal/matching/           immutable alcohol, distillery, and region matcher
 internal/usecase/normalization/ normalization batch and state transitions
 internal/usecase/matching/   matching dry-run and backfill orchestration
 internal/store/mysql/        ledger and normalization persistence
-tools/importer-seed/         official 397-name importer seed generator
 data/config.yaml             non-secret runtime constants
 ```
 

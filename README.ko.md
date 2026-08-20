@@ -59,7 +59,7 @@ task run -- match --all
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
 재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
 `--force`는 기존 terminal 정제 행을 한 번만 `STALE`로 되돌린 뒤 지정한
-`--limit` 범위로 재정제합니다. 원본·기존 정제값·관리자 수입사 연결과 수동
+`--limit` 범위로 재정제합니다. 원본·기존 정제값·공식 수입사 연결과 수동
 매칭 선택은 새 결과가 저장되기 전까지 보존됩니다. `--force`는 `--rcno`,
 `--dry-run`과 함께 사용할 수 없습니다.
 정제 상태는 `PENDING`, `STALE`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`,
@@ -94,28 +94,17 @@ Flyway migration은 `git.environment-variables/storage/db/migration`에서
 관리합니다. MFDS 전용 sqlc 입력 스키마·쿼리와 생성 코드는 `git.secrets`에서
 관리합니다.
 
-V12는 `mfds_importers`와 `mfds_missing_importers`를 만듭니다. 2026-08-15 KST에
-원장의 397개 상호를 수입식품정보마루 국내업소 화면에서 순차 조회한 결과를 고정
-seed로 포함하며, 공식 exact 단일 결과 368개는 수입사로, 복수 후보 21개와 결과
-없음 8개는 어드민 관리 큐로 저장합니다. 임의의 첫 후보는 선택하지 않습니다.
+V12는 과거 수입사 seed를 도입한 이력이고, V13은 폐기된 미매칭 관리 큐를 제거한 뒤
+`mfds_importer_rcno_links`로 공식 확인 근거를 분리합니다. 이미 적용된 V12의 checksum은
+바꾸지 않습니다.
 
-정제 시 원장 `importer_name`을 trim한 값과 공식 `business_name`이 binary exact로
-한 건만 일치할 때 `mfds_declarations.importer_id`를 `AUTO`로 연결합니다. 0건 또는
-복수이면 nullable 연결을 유지하고 `mfds_missing_importers`의 원장 건수·예시 RCNO·
-기간을 갱신합니다. 어드민에서 확정한 `ADMIN` 연결과 원장 원문,
-`importer_base_name`, `importer_search_key`는 재정제해도 보존합니다.
-
-seed 재생성은 아래 도구로 수행합니다. 입력은 공백 제외 397개 고유 상호여야 하고,
-공식 화면의 exact 결과만 사용하며 JSON manifest와 SQL을 모두 검증한 뒤 V12 생성
-구간에 삽입합니다.
-
-```bash
-go run ./tools/importer-seed \
-  --input importer-business-names.txt \
-  --manifest-output /tmp/mfds-importer-seed.json \
-  --sql-output /tmp/mfds-importer-seed.sql \
-  --migration-output git.environment-variables/storage/db/migration/V12__add_mfds_importers.sql
-```
+웹 원장 수집이 완료되면 이번 job에서 아직 RCNO 연결 근거가 없는 상호만 공식
+수입식품정보마루 화면으로 순차 조회합니다. 국내업소 exact 후보가 한 건이면 해당
+업소를 저장하고 `PAGE_NAME`으로 연결합니다. 후보가 복수이면 같은 처리일의 공식
+제품 갤러리 상세에서 RCNO와 국내업소 내부 코드를 함께 확인한 건만 `PAGE_RCNO`로
+연결합니다. 결과가 없거나 RCNO 근거가 일치하지 않으면 별도 상태나 큐를 만들지 않고
+`mfds_declarations.importer_id`를 NULL로 유지합니다. 원장 원문과 정제 문자열은 그대로
+보존합니다.
 
 ## 구조
 
@@ -126,12 +115,12 @@ internal/config/             YAML과 DB 환경 변수 로딩
 internal/source/mfdsweb/     HTTP client와 HTML parser
 internal/source/mfdscompany/ 수입식품정보마루 국내업소 HTML client/parser
 internal/usecase/weblist/    수집과 RCNO 대조
+internal/usecase/importerresolution/ 공식 페이지 기반 RCNO 수입사 해소
 internal/normalization/      순수 정제 규칙과 파서
 internal/matching/           불변 alcohol·증류소·리전 matcher
 internal/usecase/normalization/ 정제 batch와 상태 전이
 internal/usecase/matching/   매칭 dry-run과 백필 조정
 internal/store/mysql/        원장과 정제 결과 저장
-tools/importer-seed/         397개 공식 수입사 seed 생성기
 data/config.yaml             비밀이 아닌 고정 실행값
 ```
 

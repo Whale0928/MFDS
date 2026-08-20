@@ -217,48 +217,11 @@ body:has(.drawer-layer), body:has(.importer-detail-layer) { overflow: hidden; }
 .importer-official-profile { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .importer-official-profile > div { min-width: 0; border: 1px solid #d5cbbe; background: #fffaf1; }
 .importer-official-profile h3 { margin: 0; padding: 14px 16px; border-bottom: 1px solid #e5dcd0; color: #2f6177; font-size: 14px; }
-.importer-official-profile dl, .missing-detail-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
-.importer-official-profile dl > div, .missing-detail-fields > div { min-width: 0; padding: 12px 14px; border-bottom: 1px solid #e5dcd0; }
-.importer-official-profile dl > div:nth-child(odd), .missing-detail-fields > div:nth-child(odd) { border-right: 1px solid #e5dcd0; }
-.importer-official-profile dt, .missing-detail-fields dt { color: #7b8795; font: 500 10px "DM Mono", monospace; }
-.importer-official-profile dd, .missing-detail-fields dd { margin: 5px 0 0; color: #223246; font-size: 12px; line-height: 1.5; word-break: break-word; }
-.missing-queue-note { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 16px; margin-bottom: 18px; padding: 16px 20px; border-left: 5px solid #9b493e; background: #f4e4de; color: #6f443d; font-size: 12px; }
-.missing-queue-note strong { color: #884034; font-size: 14px; }
-.missing-queue-note span { padding: 4px 7px; border: 1px solid #d6b7ad; background: rgba(255, 250, 241, .55); font: 500 10px "DM Mono", monospace; }
-.missing-queue-note small { flex-basis: 100%; color: #7d635c; }
-.missing-importer-search { grid-template-columns: minmax(260px, 1.6fr) repeat(2, minmax(160px, .8fr)) auto; }
-.missing-importer-search > span { grid-column: auto; justify-self: end; align-self: center; }
-.missing-importer-register { overflow-x: auto; border: 1px solid #d5cbbe; background: #fffaf1; }
-.missing-importer-register__head, .missing-importer-record { display: grid; grid-template-columns: minmax(250px, 1.3fr) minmax(150px, .75fr) minmax(190px, 1fr) minmax(260px, 1.25fr) 150px; gap: 14px; align-items: center; min-width: 1060px; }
-.missing-importer-register__head { padding: 13px 18px; background: #18293c; color: #d6dee7; font: 10px "DM Mono", monospace; }
-.missing-importer-record { width: 100%; min-height: 100px; padding: 14px 18px; border: 0; border-bottom: 1px solid #e5dcd0; background: transparent; color: #435166; text-align: left; }
-.missing-importer-record:hover { background: #f4e4de; }
-.missing-importer-record > span { display: grid; gap: 5px; min-width: 0; white-space: normal; overflow: hidden; line-height: 1.45; }
-.missing-importer-record > span strong { color: #172638; }
-.missing-importer-record > span small { color: #718094; font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
-.missing-status { width: fit-content; padding: 4px 7px; border: 1px solid currentColor; font: 500 10px "DM Mono", monospace; }
-.missing-status--missing { color: #884034; background: #f4e4de; }
-.missing-status--ambiguous { color: #805c13; background: #f2e2bd; }
-.missing-status--open { color: #8f4924; background: #f5eadc; }
-.missing-status--resolved { color: #2c6745; background: #d9e6dc; }
-.missing-status--dismissed { color: #596678; background: #e4e8ed; }
-.missing-detail-layer { position: fixed; z-index: 25; inset: 0; display: flex; justify-content: flex-end; background: rgba(4, 11, 19, .56); }
-.missing-detail-drawer { width: min(900px, 100%); height: 100%; overflow-y: auto; border-left: 5px solid #9b493e; background: #f5efe4; box-shadow: -18px 0 50px rgba(0, 0, 0, .25); }
-.missing-detail-drawer > header { position: sticky; z-index: 2; top: 0; display: flex; justify-content: space-between; gap: 20px; align-items: start; padding: 24px 28px; border-bottom: 1px solid #405267; background: #122236; color: #fff8ed; }
-.missing-detail-drawer > header h2 { margin: 7px 0; font: 800 28px/1.25 "Nanum Myeongjo", serif; word-break: keep-all; }
-.missing-detail-drawer > header span { color: #b5c1cf; font-size: 12px; }
-.missing-detail-drawer > header button { flex: none; padding: 9px 14px; border: 1px solid #718096; background: transparent; color: #fff8ed; font-weight: 700; }
-.missing-detail-drawer__body { padding: 24px 28px 44px; }
-.missing-detail-drawer__body section { margin-top: 28px; }
-.missing-detail-drawer__body section h3 { margin: 0 0 12px; color: #142236; font: 800 20px "Nanum Myeongjo", serif; }
-.missing-detail-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-bottom: 16px; border-bottom: 1px solid #d5cbbe; color: #667486; font-size: 12px; }
-.missing-candidate-list { display: grid; gap: 12px; }
-.missing-candidate-list article { padding: 16px; border: 1px solid #d5cbbe; border-top: 4px solid #506f91; background: #fffaf1; }
-.missing-candidate-list article > strong { color: #285d70; font-size: 13px; }
-.missing-candidate-list dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 12px 0 0; }
-.missing-candidate-list dl > div { padding: 9px 10px; border-top: 1px solid #e5dcd0; }
-.missing-candidate-list dt { color: #7b8795; font: 500 10px "DM Mono", monospace; }
-.missing-candidate-list dd { margin: 4px 0 0; color: #223246; font-size: 12px; word-break: break-word; }
+.importer-official-profile dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.importer-official-profile dl > div { min-width: 0; padding: 12px 14px; border-bottom: 1px solid #e5dcd0; }
+.importer-official-profile dl > div:nth-child(odd) { border-right: 1px solid #e5dcd0; }
+.importer-official-profile dt { color: #7b8795; font: 500 10px "DM Mono", monospace; }
+.importer-official-profile dd { margin: 5px 0 0; color: #223246; font-size: 12px; line-height: 1.5; word-break: break-word; }
 
 .drawer__importer-link { display: grid; grid-template-columns: minmax(170px, 1fr) auto minmax(170px, 1fr) auto; gap: 14px; align-items: center; margin: 12px 0 18px; padding: 14px 16px; border: 1px solid #c8c0b5; border-left: 4px solid #7d8996; background: #f1ece4; }
 .drawer__importer-link.is-linked { border-left-color: #c47a43; background: #f5eadc; }
@@ -285,16 +248,6 @@ body:has(.drawer-layer), body:has(.importer-detail-layer) { overflow: hidden; }
   .drawer__importer-link { grid-template-columns: 1fr; gap: 8px; }
   .drawer__importer-link i { transform: rotate(90deg); }
   .drawer__importer-link button { width: 100%; }
-  .importer-official-profile, .missing-candidate-list dl, .missing-detail-fields { grid-template-columns: 1fr; }
-  .importer-official-profile dl > div:nth-child(odd), .missing-detail-fields > div:nth-child(odd), .missing-candidate-list dl > div { border-right: 0; }
-  .missing-queue-note { align-items: start; flex-direction: column; }
-  .missing-importer-search { display: flex; }
-  .missing-importer-register { overflow: visible; border: 0; background: none; }
-  .missing-importer-register__head { display: none; }
-  .missing-importer-record { min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-bottom: 10px; padding: 16px; border: 1px solid #d5cbbe; background: #fffaf1; }
-  .missing-importer-record > span { overflow: visible; }
-  .missing-importer-record > span::before { content: attr(data-label); display: block; margin-bottom: 3px; color: #7e8999; font: 10px "DM Mono", monospace; }
-  .missing-importer-record > span:first-child, .missing-importer-record > span:nth-child(4), .missing-importer-record > span:last-child { grid-column: 1 / -1; }
-  .missing-detail-drawer > header { padding: 18px 16px; }
-  .missing-detail-drawer__body { padding: 18px 14px 32px; }
+	.importer-official-profile { grid-template-columns: 1fr; }
+	.importer-official-profile dl > div:nth-child(odd) { border-right: 0; }
 }

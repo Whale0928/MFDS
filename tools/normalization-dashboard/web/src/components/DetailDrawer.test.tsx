@@ -97,7 +97,7 @@ describe('DetailDrawer', () => {
 
     expect(html).toContain('원장 수입사')
     expect(html).toContain('정제 수입사')
-    expect(html).toContain('ID 7 · 상호 exact 자동 연결')
+		expect(html).toContain('ID 7 · 공식 상호 단일 후보')
     expect(html).toContain('수입사 모든 정보 보기')
   })
 })

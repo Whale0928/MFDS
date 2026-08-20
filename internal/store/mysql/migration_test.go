@@ -47,7 +47,7 @@ func TestFlywayV11_MFDS신규스키마만추가한다(t *testing.T) {
 	}
 }
 
-func TestFlywayV12_공식수입사와관리대상수입사를추가한다(t *testing.T) {
+func TestFlywayV12_공식수입사와원장연결필드를추가한다(t *testing.T) {
 	path := filepath.Join(
 		"..", "..", "..", "git.environment-variables", "storage", "db", "migration",
 		"V12__add_mfds_importers.sql",
@@ -58,20 +58,15 @@ func TestFlywayV12_공식수입사와관리대상수입사를추가한다(t *tes
 	}
 	sql := strings.ToUpper(string(contents))
 
-	for _, table := range []string{"MFDS_IMPORTERS", "MFDS_MISSING_IMPORTERS"} {
-		if !strings.Contains(sql, "CREATE TABLE "+table) {
-			t.Fatalf("V12 must create %s", table)
-		}
+	if !strings.Contains(sql, "CREATE TABLE MFDS_IMPORTERS") {
+		t.Fatal("V12 must create MFDS_IMPORTERS")
 	}
 	for _, required := range []string{
 		"OFFICIAL_BUSINESS_CODE",
 		"BUSINESS_NAME_KEY_SHA256",
-		"SOURCE_NAME_KEY_SHA256",
-		"CANDIDATES_JSON",
 		"DESCRIPTION",
 		"ADMIN_NOTE",
 		"ADMIN_STATUS",
-		"RESOLVED_IMPORTER_ID",
 		"ALTER TABLE MFDS_DECLARATIONS",
 		"ADD COLUMN IMPORTER_ID",
 		"ADD COLUMN IMPORTER_LINK_SOURCE",
@@ -79,7 +74,6 @@ func TestFlywayV12_공식수입사와관리대상수입사를추가한다(t *tes
 		"CREATE OR REPLACE VIEW MFDS_DECLARATION_DETAILS",
 		"SELECT D.*",
 		"INSERT INTO MFDS_IMPORTERS",
-		"INSERT INTO MFDS_MISSING_IMPORTERS",
 	} {
 		if !strings.Contains(sql, required) {
 			t.Fatalf("V12 must contain %q", required)
@@ -96,5 +90,34 @@ func TestFlywayV12_공식수입사와관리대상수입사를추가한다(t *tes
 		if strings.Contains(sql, "CREATE TABLE "+obsolete) {
 			t.Fatalf("V12 must not recreate obsolete company registry table %s", obsolete)
 		}
+	}
+}
+
+func TestFlywayV13_폐기큐를RCNO연결근거로교체한다(t *testing.T) {
+	path := filepath.Join(
+		"..", "..", "..", "git.environment-variables", "storage", "db", "migration",
+		"V13__replace_missing_importers_with_rcno_links.sql",
+	)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(string(contents))
+
+	for _, required := range []string{
+		"CREATE TABLE MFDS_IMPORTER_RCNO_LINKS",
+		"PRIMARY KEY (RCNO)",
+		"FOREIGN KEY (IMPORTER_ID) REFERENCES MFDS_IMPORTERS",
+		"LINK_SOURCE",
+		"PAGE_NAME",
+		"PAGE_RCNO",
+		"DROP TABLE IF EXISTS MFDS_MISSING_IMPORTERS",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("V13 must contain %q", required)
+		}
+	}
+	if strings.Contains(sql, "+GOOSE") {
+		t.Fatal("V13 must be a Flyway migration without Goose directives")
 	}
 }

@@ -11,8 +11,10 @@ import (
 
 	"github.com/bottle-note/mfds-crawler/cmd"
 	"github.com/bottle-note/mfds-crawler/internal/config"
+	"github.com/bottle-note/mfds-crawler/internal/source/mfdscompany"
 	"github.com/bottle-note/mfds-crawler/internal/source/mfdsweb"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
+	"github.com/bottle-note/mfds-crawler/internal/usecase/importerresolution"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
 
@@ -58,7 +60,29 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			if err != nil {
 				return weblist.JobResult{}, err
 			}
-			return service.ExecuteJob(ctx, command)
+			result, err := service.ExecuteJob(ctx, command)
+			if err != nil || result.Status != weblist.RunStatusCompleted {
+				return result, err
+			}
+			companyScraper, err := mfdscompany.NewScraper(mfdscompany.Options{BaseURL: baseURL})
+			if err != nil {
+				return result, err
+			}
+			requestDelay := time.Duration(0)
+			if cfg.Web.QPS > 0 {
+				requestDelay = time.Duration(float64(time.Second) / cfg.Web.QPS)
+			}
+			importerService, err := importerresolution.NewService(store, companyScraper, importerresolution.Options{
+				PageSize: mfdscompany.MaximumPageSize, Delay: requestDelay,
+				Industry: "141", State: "ING",
+			})
+			if err != nil {
+				return result, err
+			}
+			if _, err := importerService.SyncJob(ctx, result.RunID); err != nil {
+				return result, err
+			}
+			return result, nil
 		},
 		RunNormalization: runNormalization,
 		RunMatching:      runMatching,

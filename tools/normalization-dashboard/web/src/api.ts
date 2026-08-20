@@ -1,4 +1,4 @@
-import type { Declaration, DeclarationPage, DeclarationQuery, Filters, ImporterDetail, ImporterLedgerPage, ImporterPage, ImporterProductPage, ImporterQuery, MissingImporterPage, MissingImporterQuery, Overview, Quality } from './types'
+import type { Declaration, DeclarationPage, DeclarationQuery, Filters, ImporterDetail, ImporterLedgerPage, ImporterPage, ImporterProductPage, ImporterQuery, Overview, Quality } from './types'
 
 const API_BASE = import.meta.env.VITE_MFDS_API_BASE ?? '/api'
 
@@ -24,7 +24,5 @@ export const api = {
   importer: (importerID: number) => request<ImporterDetail>(`/importers/detail${queryString({ importer_id: importerID })}`),
   importerProducts: (importerID: number, page: number, pageSize = 20) => request<ImporterProductPage>(`/importers/products${queryString({ importer_id: importerID, page, page_size: pageSize })}`),
   importerProductDeclarations: (importerID: number, productKey: string, page: number, pageSize = 10) => request<ImporterLedgerPage>(`/importers/product-declarations${queryString({ importer_id: importerID, product_key: productKey, page, page_size: pageSize })}`),
-  missingImporters: (query: MissingImporterQuery) => request<MissingImporterPage>(`/missing-importers${queryString(query)}`),
-  missingImporter: (missingImporterID: number) => request<MissingImporterPage['missing_importers'][number]>(`/missing-importers/detail${queryString({ missing_importer_id: missingImporterID })}`),
   quality: () => request<Quality>('/quality'),
 }

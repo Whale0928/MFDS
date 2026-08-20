@@ -141,6 +141,70 @@ func TestScraper_Detail_RejectsNonHTML(t *testing.T) {
 	}
 }
 
+func TestScraper_SearchGalleryAndDetail_ResolvesRCNOToBusinessCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		switch request.URL.Path {
+		case GalleryListPath:
+			if request.URL.Query().Get("bsshNm") != "에이스무역" ||
+				request.URL.Query().Get("rceptBeginDtm") != "2025-09-11" {
+				t.Fatalf("gallery query = %s", request.URL.RawQuery)
+			}
+			_, _ = writer.Write([]byte(galleryListFixture))
+		case GalleryDetailPath:
+			if request.URL.Query().Get("prductCd") != "201940000755" {
+				t.Fatalf("gallery detail query = %s", request.URL.RawQuery)
+			}
+			_, _ = writer.Write([]byte(galleryDetailFixture))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	scraper, err := NewScraper(Options{BaseURL: baseURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processedAt := time.Date(2025, time.September, 11, 0, 0, 0, 0, time.UTC)
+	page, err := scraper.SearchGallery(context.Background(), GallerySearchRequest{
+		Page: 1, Limit: 50, BusinessName: "에이스무역", FromDate: processedAt, ToDate: processedAt,
+	})
+	if err != nil {
+		t.Fatalf("SearchGallery() error = %v", err)
+	}
+	if page.Total != 1 || len(page.Products) != 1 || page.Products[0].ProductCode != "201940000755" {
+		t.Fatalf("gallery page = %+v", page)
+	}
+	detail, err := scraper.GalleryDetail(context.Background(), page.Products[0].ProductCode)
+	if err != nil {
+		t.Fatalf("GalleryDetail() error = %v", err)
+	}
+	if detail.RCNO != "202500622605" || detail.InternalBusinessCode != "2015001005371115" || detail.BusinessName != "에이스무역" {
+		t.Fatalf("gallery detail = %+v", detail)
+	}
+}
+
+func TestScraper_SearchGallery_결과수가맞지않으면실패한다(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		_, _ = writer.Write([]byte(`<html><body><div class="board_count">총 1건</div></body></html>`))
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	scraper, err := NewScraper(Options{BaseURL: baseURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processedAt := time.Date(2026, time.August, 20, 0, 0, 0, 0, time.UTC)
+	_, err = scraper.SearchGallery(context.Background(), GallerySearchRequest{
+		Page: 1, Limit: 50, BusinessName: "에이스무역", FromDate: processedAt, ToDate: processedAt,
+	})
+	if err == nil || !strings.Contains(err.Error(), "결과 수가 정확하지 않습니다") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 const listFixture = `<!doctype html>
 <html lang="ko"><body>
 <ul><li>
@@ -173,3 +237,18 @@ const detailFixture = `<!doctype html>
 <tr><th><span>대표자</span></th><td>김대표</td><th><span>허가일자</span></th><td>2024-01-02</td></tr>
 <tr><th><span>인허가기관</span></th><td colspan="3">서울청</td></tr>
 </tbody></table></section></body></html>`
+
+const galleryListFixture = `<!doctype html><html lang="ko"><body>
+<div class="board_count blue"><span>총 <strong>1</strong>건</span></div>
+<div class="biz_gallery_list"><a href="javascript:fnGalleryMobileDetail(&#39;201940000755&#39;);">
+<strong class="title">크랄스카 진</strong></a></div>
+</body></html>`
+
+const galleryDetailFixture = `<!doctype html><html lang="ko"><body><script>
+var param = {
+  "bsshNm":"에이스무역",
+  "rcno":"202500622605",
+  "grpBsnLcnsLedgNo":"2015001005371115",
+  "prductCd":"201940000755"
+};
+</script></body></html>`
