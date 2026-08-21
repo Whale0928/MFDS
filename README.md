@@ -137,7 +137,7 @@ task sqlc:check
 task compose:config
 ```
 
-## Scheduled deployment draft
+## Scheduled deployment
 
 The Kubernetes manifests live in the `git.environment-variables` submodule.
 Collection and normalization are separate daily `CronJob` resources so a failure
@@ -149,17 +149,20 @@ three hours after collection, after the collector's 30-minute start allowance an
 two-hour execution deadline. It still runs independently against existing pending
 or stale rows when collection fails.
 
-All four schedules remain explicitly `suspend: true` in their target overlays.
-Enable them only through a reviewed Git change; an imperative cluster edit is
-reverted by Argo CD self-heal. Before enabling an environment, replace the
-`replace-before-enable` image tag with a published immutable tag, add an encrypted
-`mfds-crawler-env` Secret with a `MYSQL_DSN` key to that overlay's KSOPS generator,
-verify that Flyway V13 is applied, and approve the schedule and the 10,000-row
-capacity using observed inflow and remaining queue metrics. Secret values are not
-stored in these manifests.
+Development runs the signed `v0.1.0` release image with both schedules enabled.
+Its `mfds-secrets` Secret contains only `MYSQL_DSN`, is encrypted with SOPS in the
+environment repository, and points to the BottleNote development database. Flyway
+V13 and the release image's database health check were verified before enabling it.
 
-Activation also remains blocked on an explicit retry policy for unresolved
-importer lookups. The current collector intentionally reports failure when its
-post-collection importer sync fails, even though the append-only collection
-transaction may already be committed; operators must distinguish those two
-outcomes rather than treating a failed Job as lost collection data.
+Production remains at `replace-before-enable`, both schedules are `suspend: true`,
+and no production `mfds-secrets` resource is deployed. Before enabling production,
+add its SOPS-encrypted Secret through a reviewed Git change, select an immutable
+image tag, revalidate Flyway V13, and approve the schedule and 10,000-row capacity
+using observed inflow and remaining queue metrics. Imperative cluster edits are
+reverted by Argo CD self-heal, and Secret values are never stored in plaintext.
+
+An unresolved importer lookup has no negative marker yet, so repeated lookup cost
+must be monitored. The collector also intentionally reports failure when its
+post-collection importer sync fails, even if the append-only collection transaction
+was already committed; operators must distinguish those two outcomes rather than
+treating a failed Job as lost collection data.

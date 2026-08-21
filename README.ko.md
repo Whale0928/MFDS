@@ -133,7 +133,7 @@ task sqlc:check
 task compose:config
 ```
 
-## 정기 배포 초안
+## 정기 배포
 
 Kubernetes manifest는 `git.environment-variables` submodule에 있습니다. 수집과
 정제는 서로 다른 일일 `CronJob`으로 등록해 한쪽 실패가 다른 쪽의 시작이나 결과에
@@ -144,15 +144,19 @@ production 03:00/06:00 KST입니다. 두 실행 모두 `concurrencyPolicy: Forbi
 3시간 뒤에 시작합니다. 수집이 실패해도 기존 `PENDING` 또는 `STALE` 대상은 별도로
 정제합니다.
 
-네 일정은 대상 overlay에 모두 `suspend: true`로 명시되어 있습니다. Argo CD
-self-heal이 명령형 cluster 변경을 되돌리므로, 활성화는 검토된 Git 변경으로만
-수행합니다. 환경별 활성화 전에 `replace-before-enable`을 배포된 immutable image
-tag로 교체하고, 해당 overlay의 KSOPS generator에 `MYSQL_DSN` 키를 가진 암호화된
-`mfds-crawler-env` Secret을 추가하며, Flyway V13 적용 여부를 확인해야 합니다.
-또한 실측 유입량과 잔여 queue 지표로 일정과 10,000건 처리 용량을 승인해야 합니다.
-Secret 값은 이 manifest에 저장하지 않습니다.
+development는 서명된 `v0.1.0` release image로 두 일정을 활성화했습니다.
+`mfds-secrets` Secret은 `MYSQL_DSN`만 포함하고 환경 저장소에서 SOPS로 암호화하며,
+BottleNote development DB를 가리킵니다. 활성화 전에 Flyway V13과 release image의
+DB health를 확인했습니다.
 
-공식 수입사 조회 실패 대상의 재시도 정책이 확정되기 전에도 활성화하지 않습니다.
-현재 수집기는 append-only 수집 transaction이 이미 commit되었더라도 후속 importer
-sync가 실패하면 의도적으로 실패를 보고합니다. 운영자는 실패한 Job을 수집 데이터
-유실로 간주하지 말고 두 결과를 구분해야 합니다.
+production은 `replace-before-enable`과 두 일정의 `suspend: true`를 유지하고 있으며
+production `mfds-secrets` 리소스도 배포하지 않았습니다. production 활성화 전에는
+검토된 Git 변경으로 SOPS 암호화 Secret을 추가하고 immutable image tag를 선택하며,
+Flyway V13을 다시 검증해야 합니다. 또한 실측 유입량과 잔여 queue 지표로 일정과
+10,000건 처리 용량을 승인해야 합니다. Argo CD self-heal이 명령형 cluster 변경을
+되돌리며 Secret 값은 평문으로 저장하지 않습니다.
+
+공식 수입사 조회 실패 대상에는 아직 negative marker가 없어 반복 조회 비용을
+관찰해야 합니다. 현재 수집기는 append-only 수집 transaction이 이미 commit됐더라도
+후속 importer sync가 실패하면 의도적으로 실패를 보고합니다. 운영자는 실패한 Job을
+수집 데이터 유실로 간주하지 말고 두 결과를 구분해야 합니다.
