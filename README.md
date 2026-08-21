@@ -141,12 +141,25 @@ task compose:config
 
 The Kubernetes manifests live in the `git.environment-variables` submodule.
 Collection and normalization are separate daily `CronJob` resources so a failure
-in one does not start or fail the other. The review defaults are 01:00/02:00 KST
-for development and 03:00/04:00 KST for production. Both use
+in one does not start or fail the other. The review defaults are 01:00/04:00 KST
+for development and 03:00/06:00 KST for production. Both use
 `concurrencyPolicy: Forbid`; collection runs `collect-recent`, while normalization
-runs the bounded `normalize --limit 100` batch.
+runs the bounded `normalize --limit 10000` batch. The normalization window starts
+three hours after collection, after the collector's 30-minute start allowance and
+two-hour execution deadline. It still runs independently against existing pending
+or stale rows when collection fails.
 
-All four schedules remain `suspend: true`. Before enabling an environment, replace
-the `replace-before-enable` image tag with a published immutable tag, provision the
-`mfds-crawler-env` Secret with a `MYSQL_DSN` key, verify that Flyway V13 is applied,
-and approve the review schedule. Secret values are not stored in these manifests.
+All four schedules remain explicitly `suspend: true` in their target overlays.
+Enable them only through a reviewed Git change; an imperative cluster edit is
+reverted by Argo CD self-heal. Before enabling an environment, replace the
+`replace-before-enable` image tag with a published immutable tag, add an encrypted
+`mfds-crawler-env` Secret with a `MYSQL_DSN` key to that overlay's KSOPS generator,
+verify that Flyway V13 is applied, and approve the schedule and the 10,000-row
+capacity using observed inflow and remaining queue metrics. Secret values are not
+stored in these manifests.
+
+Activation also remains blocked on an explicit retry policy for unresolved
+importer lookups. The current collector intentionally reports failure when its
+post-collection importer sync fails, even though the append-only collection
+transaction may already be committed; operators must distinguish those two
+outcomes rather than treating a failed Job as lost collection data.
