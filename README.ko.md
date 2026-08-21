@@ -132,3 +132,18 @@ task test:race
 task sqlc:check
 task compose:config
 ```
+
+## 정기 배포 초안
+
+Kubernetes manifest는 `git.environment-variables` submodule에 있습니다. 수집과
+정제는 서로 다른 일일 `CronJob`으로 등록해 한쪽 실패가 다른 쪽의 시작이나 결과에
+영향을 주지 않게 했습니다. 검토용 기본 일정은 development 01:00/02:00 KST,
+production 03:00/04:00 KST입니다. 두 실행 모두 `concurrencyPolicy: Forbid`를
+사용하고, 수집은 `collect-recent`, 정제는 제한된 `normalize --limit 100` batch만
+실행합니다.
+
+네 일정은 모두 `suspend: true` 상태입니다. 환경별 활성화 전에
+`replace-before-enable`을 배포된 immutable image tag로 교체하고,
+`mfds-crawler-env` Secret의 `MYSQL_DSN` 키 존재 여부와 Flyway V13 적용 여부 및
+검토용 일정을 확인한 뒤 `suspend`를 해제해야 합니다. Secret 값은 manifest에
+저장하지 않습니다.

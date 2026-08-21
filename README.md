@@ -136,3 +136,17 @@ task test:race
 task sqlc:check
 task compose:config
 ```
+
+## Scheduled deployment draft
+
+The Kubernetes manifests live in the `git.environment-variables` submodule.
+Collection and normalization are separate daily `CronJob` resources so a failure
+in one does not start or fail the other. The review defaults are 01:00/02:00 KST
+for development and 03:00/04:00 KST for production. Both use
+`concurrencyPolicy: Forbid`; collection runs `collect-recent`, while normalization
+runs the bounded `normalize --limit 100` batch.
+
+All four schedules remain `suspend: true`. Before enabling an environment, replace
+the `replace-before-enable` image tag with a published immutable tag, provision the
+`mfds-crawler-env` Secret with a `MYSQL_DSN` key, verify that Flyway V13 is applied,
+and approve the review schedule. Secret values are not stored in these manifests.
