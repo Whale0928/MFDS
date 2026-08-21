@@ -99,13 +99,16 @@ V12 is the historical migration that introduced the importer seed. V13 removes
 the retired unmatched-importer queue and records official evidence in
 `mfds_importer_rcno_links`. The checksum of an already-applied V12 is not changed.
 
-After a web-ledger job completes, the application sequentially resolves only the
-trade names whose RCNO has no evidence yet. One exact domestic-business candidate
-is stored and linked as `PAGE_NAME`. For multiple candidates, only a product
-gallery detail that exposes both the same RCNO and a matching domestic-business
-code is linked as `PAGE_RCNO`. No result or no matching RCNO evidence leaves
-`mfds_declarations.importer_id` NULL without creating a separate status or queue.
-The immutable source ledger and normalized importer text remain intact.
+After a web-ledger job completes, the application groups the current job and all
+historical unresolved declarations by the exact source trade name. One exact
+`mfds_importers` row is reused and linked before any page request. Otherwise the
+official domestic-business page is searched once per trade name. One exact page
+candidate is stored and linked as `PAGE_NAME`; for multiple candidates, only a
+product gallery detail that exposes both the same RCNO and a matching domestic-
+business code is stored and linked as `PAGE_RCNO`. No result, unexpected page
+failure, or no matching RCNO evidence creates an importer row. The declaration
+stays unlinked, and the immutable source ledger and normalized importer text
+remain intact.
 
 ## Structure
 

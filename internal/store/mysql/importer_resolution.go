@@ -14,16 +14,44 @@ import (
 
 func (s *Store) ListPendingImporterGroups(ctx context.Context, jobID uint64) ([]importerresolution.PendingGroup, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT TRIM(item.importer_name), item.processed_date, item.rcno
-		FROM mfds_items AS item
-		LEFT JOIN mfds_importer_rcno_links AS link
-		  ON link.rcno = item.rcno
-		 AND CAST(link.source_importer_name AS BINARY) = CAST(TRIM(item.importer_name) AS BINARY)
-		WHERE item.job_id = ?
-		  AND NULLIF(TRIM(item.importer_name), '') IS NOT NULL
-		  AND link.rcno IS NULL
-		GROUP BY CAST(TRIM(item.importer_name) AS BINARY), item.processed_date, item.rcno
-		ORDER BY item.processed_date, CAST(TRIM(item.importer_name) AS BINARY), item.rcno
+		WITH ranked_current AS (
+			SELECT item.rcno, TRIM(item.importer_name) AS business_name, item.processed_date,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY item.rcno ORDER BY item.observed_at DESC, item.id DESC
+			       ) AS row_no
+			FROM mfds_items AS item
+			WHERE item.job_id = ?
+			  AND NULLIF(TRIM(item.importer_name), '') IS NOT NULL
+		), current_items AS (
+			SELECT rcno, business_name, processed_date
+			FROM ranked_current
+			WHERE row_no = 1
+		), pending AS (
+			SELECT current.rcno, current.business_name, current.processed_date
+			FROM current_items AS current
+			LEFT JOIN mfds_importer_rcno_links AS link
+			  ON link.rcno = current.rcno
+			 AND CAST(link.source_importer_name AS BINARY) = CAST(current.business_name AS BINARY)
+			WHERE link.rcno IS NULL
+
+			UNION ALL
+
+			SELECT declaration.rcno, TRIM(item.importer_name), item.processed_date
+			FROM mfds_declarations AS declaration
+			JOIN mfds_items AS item ON item.id = declaration.source_item_id
+			LEFT JOIN mfds_importer_rcno_links AS link
+			  ON link.rcno = declaration.rcno
+			 AND CAST(link.source_importer_name AS BINARY) = CAST(TRIM(item.importer_name) AS BINARY)
+			WHERE declaration.importer_id IS NULL
+			  AND NULLIF(TRIM(item.importer_name), '') IS NOT NULL
+			  AND link.rcno IS NULL
+			  AND NOT EXISTS (
+			      SELECT 1 FROM current_items AS current WHERE current.rcno = declaration.rcno
+			  )
+		)
+		SELECT business_name, processed_date, rcno
+		FROM pending
+		ORDER BY CAST(business_name AS BINARY), processed_date, rcno
 	`, jobID)
 	if err != nil {
 		return nil, fmt.Errorf("수입사 해소 대상 조회 실패: %w", err)
@@ -41,16 +69,77 @@ func (s *Store) ListPendingImporterGroups(ctx context.Context, jobID uint64) ([]
 			date = processedDate.Time
 		}
 		last := len(groups) - 1
-		if last < 0 || groups[last].BusinessName != name || !groups[last].ProcessDate.Equal(date) {
-			groups = append(groups, importerresolution.PendingGroup{BusinessName: name, ProcessDate: date})
+		if last < 0 || groups[last].BusinessName != name {
+			groups = append(groups, importerresolution.PendingGroup{BusinessName: name})
 			last++
 		}
-		groups[last].RCNOs = append(groups[last].RCNOs, rcno)
+		groups[last].Records = append(groups[last].Records, importerresolution.PendingRecord{
+			RCNO: rcno, ProcessDate: date,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("수입사 해소 대상 순회 실패: %w", err)
 	}
 	return groups, nil
+}
+
+func (s *Store) FindExactImporter(ctx context.Context, businessName string) (*importerresolution.ExactImporter, error) {
+	name := strings.TrimSpace(businessName)
+	if name == "" {
+		return nil, nil
+	}
+	nameKey := sha256.Sum256([]byte(name))
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, source_observed_at
+		FROM mfds_importers
+		WHERE business_name_key_sha256 = ?
+		  AND CAST(business_name AS BINARY) = CAST(? AS BINARY)
+		LIMIT 2
+	`, nameKey[:], name)
+	if err != nil {
+		return nil, fmt.Errorf("정제 수입사 exact 조회 실패: %w", err)
+	}
+	defer rows.Close()
+	matches := make([]importerresolution.ExactImporter, 0, 2)
+	for rows.Next() {
+		var match importerresolution.ExactImporter
+		if err := rows.Scan(&match.ID, &match.SourceObservedAt); err != nil {
+			return nil, fmt.Errorf("정제 수입사 exact scan 실패: %w", err)
+		}
+		matches = append(matches, match)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("정제 수입사 exact 순회 실패: %w", err)
+	}
+	if len(matches) != 1 {
+		return nil, nil
+	}
+	return &matches[0], nil
+}
+
+func (s *Store) SaveExactImporterResolutions(
+	ctx context.Context,
+	resolutions []importerresolution.ExactResolution,
+) error {
+	if len(resolutions) == 0 {
+		return nil
+	}
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		for _, resolution := range resolutions {
+			if strings.TrimSpace(resolution.RCNO) == "" || strings.TrimSpace(resolution.BusinessName) == "" ||
+				resolution.ImporterID == 0 || resolution.SourceObservedAt.IsZero() {
+				return fmt.Errorf("DB exact 수입사 연결 필드가 유효하지 않습니다")
+			}
+			if err := saveImporterLink(ctx, tx, importerLink{
+				rcno: resolution.RCNO, importerID: resolution.ImporterID,
+				businessName: resolution.BusinessName, source: "PAGE_NAME",
+				observedAt: resolution.SourceObservedAt,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Store) SaveImporterResolutions(ctx context.Context, resolutions []importerresolution.Resolution) error {
@@ -70,7 +159,7 @@ func (s *Store) SaveImporterResolutions(ctx context.Context, resolutions []impor
 			}
 			var galleryURL any
 			var galleryHash any
-			var galleryObservedAt any = resolution.ListSource.RetrievedAt
+			galleryObservedAt := resolution.ListSource.RetrievedAt
 			linkSource := "PAGE_NAME"
 			if resolution.GallerySource != nil {
 				linkSource = "PAGE_RCNO"
@@ -81,35 +170,56 @@ func (s *Store) SaveImporterResolutions(ctx context.Context, resolutions []impor
 				}
 				galleryObservedAt = resolution.GallerySource.RetrievedAt
 			}
-			_, err = tx.ExecContext(ctx, `
-				INSERT INTO mfds_importer_rcno_links (
-					rcno, importer_id, source_importer_name, link_source,
-					source_gallery_url, source_gallery_sha256, source_observed_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?)
-				ON DUPLICATE KEY UPDATE
-					importer_id = VALUES(importer_id),
-					source_importer_name = VALUES(source_importer_name),
-					link_source = VALUES(link_source),
-					source_gallery_url = VALUES(source_gallery_url),
-					source_gallery_sha256 = VALUES(source_gallery_sha256),
-					source_observed_at = VALUES(source_observed_at)
-			`, resolution.RCNO, importerID, resolution.BusinessName, linkSource,
-				galleryURL, galleryHash, galleryObservedAt)
-			if err != nil {
-				return fmt.Errorf("RCNO 수입사 증빙 저장 실패: %w", err)
-			}
-			_, err = tx.ExecContext(ctx, `
-				UPDATE mfds_declarations
-				SET importer_id = ?, importer_link_source = ?, importer_linked_at = NOW(6)
-				WHERE rcno = ?
-				  AND NOT (importer_id <=> ? AND importer_link_source <=> ?)
-			`, importerID, linkSource, resolution.RCNO, importerID, linkSource)
-			if err != nil {
-				return fmt.Errorf("정제 원장 수입사 연결 갱신 실패: %w", err)
+			if err := saveImporterLink(ctx, tx, importerLink{
+				rcno: resolution.RCNO, importerID: importerID,
+				businessName: resolution.BusinessName, source: linkSource,
+				galleryURL: galleryURL, galleryHash: galleryHash, observedAt: galleryObservedAt,
+			}); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
+}
+
+type importerLink struct {
+	rcno         string
+	importerID   uint64
+	businessName string
+	source       string
+	galleryURL   any
+	galleryHash  any
+	observedAt   time.Time
+}
+
+func saveImporterLink(ctx context.Context, tx *sql.Tx, link importerLink) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO mfds_importer_rcno_links (
+			rcno, importer_id, source_importer_name, link_source,
+			source_gallery_url, source_gallery_sha256, source_observed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			importer_id = VALUES(importer_id),
+			source_importer_name = VALUES(source_importer_name),
+			link_source = VALUES(link_source),
+			source_gallery_url = VALUES(source_gallery_url),
+			source_gallery_sha256 = VALUES(source_gallery_sha256),
+			source_observed_at = VALUES(source_observed_at)
+	`, link.rcno, link.importerID, link.businessName, link.source,
+		link.galleryURL, link.galleryHash, link.observedAt)
+	if err != nil {
+		return fmt.Errorf("RCNO 수입사 증빙 저장 실패: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE mfds_declarations
+		SET importer_id = ?, importer_link_source = ?, importer_linked_at = NOW(6)
+		WHERE rcno = ?
+		  AND NOT (importer_id <=> ? AND importer_link_source <=> ?)
+	`, link.importerID, link.source, link.rcno, link.importerID, link.source)
+	if err != nil {
+		return fmt.Errorf("정제 원장 수입사 연결 갱신 실패: %w", err)
+	}
+	return nil
 }
 
 func upsertResolvedImporter(ctx context.Context, tx *sql.Tx, resolution importerresolution.Resolution) (uint64, error) {

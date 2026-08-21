@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,8 +39,8 @@ func NewService(store Store, source Source, options Options) (*Service, error) {
 	}
 	industry := strings.TrimSpace(options.Industry)
 	state := strings.TrimSpace(options.State)
-	if industry == "" || state == "" {
-		return nil, errors.New("수입사 해소 업종과 영업상태가 필요합니다")
+	if industry == "" {
+		return nil, errors.New("수입사 해소 업종이 필요합니다")
 	}
 	return &Service{store: store, source: source, pageSize: options.PageSize, delay: options.Delay, industry: industry, state: state}, nil
 }
@@ -54,7 +55,25 @@ func (s *Service) SyncJob(ctx context.Context, jobID uint64) (Summary, error) {
 	}
 	summary := Summary{Groups: len(groups)}
 	for _, group := range groups {
-		summary.RCNOs += len(group.RCNOs)
+		summary.RCNOs += len(group.Records)
+		exactImporter, err := s.store.FindExactImporter(ctx, group.BusinessName)
+		if err != nil {
+			return summary, fmt.Errorf("수입사 %q DB exact 조회 실패: %w", group.BusinessName, err)
+		}
+		if exactImporter != nil {
+			resolutions := make([]ExactResolution, 0, len(group.Records))
+			for _, record := range group.Records {
+				resolutions = append(resolutions, ExactResolution{
+					RCNO: record.RCNO, BusinessName: group.BusinessName,
+					ImporterID: exactImporter.ID, SourceObservedAt: exactImporter.SourceObservedAt,
+				})
+			}
+			if err := s.store.SaveExactImporterResolutions(ctx, resolutions); err != nil {
+				return summary, err
+			}
+			summary.Resolved += len(resolutions)
+			continue
+		}
 		resolutions, err := s.resolveGroup(ctx, group)
 		if err != nil {
 			return summary, fmt.Errorf("수입사 %q 해소 실패: %w", group.BusinessName, err)
@@ -63,7 +82,7 @@ func (s *Service) SyncJob(ctx context.Context, jobID uint64) (Summary, error) {
 			return summary, err
 		}
 		summary.Resolved += len(resolutions)
-		summary.Unresolved += len(group.RCNOs) - len(resolutions)
+		summary.Unresolved += len(group.Records) - len(resolutions)
 	}
 	return summary, nil
 }
@@ -78,16 +97,14 @@ func (s *Service) resolveGroup(ctx context.Context, group PendingGroup) ([]Resol
 		if err != nil {
 			return nil, err
 		}
-		result := make([]Resolution, 0, len(group.RCNOs))
-		for _, rcno := range group.RCNOs {
+		result := make([]Resolution, 0, len(group.Records))
+		for _, record := range group.Records {
 			result = append(result, Resolution{
-				RCNO: rcno, BusinessName: group.BusinessName, Importer: detail, ListSource: candidates[0].source,
+				RCNO: record.RCNO, BusinessName: group.BusinessName,
+				Importer: detail, ListSource: candidates[0].source,
 			})
 		}
 		return result, nil
-	}
-	if group.ProcessDate.IsZero() {
-		return nil, nil
 	}
 	return s.resolveFromGallery(ctx, group, candidates)
 }
@@ -95,12 +112,13 @@ func (s *Service) resolveGroup(ctx context.Context, group PendingGroup) ([]Resol
 func (s *Service) searchExactCandidates(ctx context.Context, name string) ([]officialCandidate, error) {
 	var candidates []officialCandidate
 	seenCodes := make(map[string]struct{})
+	var totalSnapshot *int
 	for pageNo := 1; ; pageNo++ {
 		if err := s.wait(ctx); err != nil {
 			return nil, err
 		}
 		page, err := s.source.Search(ctx, mfdscompany.SearchRequest{
-			Page: pageNo, Limit: s.pageSize, IndustryCode: s.industry,
+			Page: pageNo, Limit: s.pageSize, TotalSnapshot: totalSnapshot, IndustryCode: s.industry,
 			BusinessName: name, OperatingState: s.state,
 		})
 		if err != nil {
@@ -116,6 +134,10 @@ func (s *Service) searchExactCandidates(ctx context.Context, name string) ([]off
 				candidates = append(candidates, officialCandidate{result: candidate, source: page.Source})
 			}
 		}
+		if pageNo == 1 {
+			snapshot := page.Total
+			totalSnapshot = &snapshot
+		}
 		if page.TotalPages == 0 || pageNo >= page.TotalPages {
 			return candidates, nil
 		}
@@ -127,19 +149,74 @@ func (s *Service) resolveFromGallery(ctx context.Context, group PendingGroup, ca
 	for _, candidate := range candidates {
 		candidateByCode[candidate.result.InternalBusinessCode] = candidate
 	}
-	wanted := make(map[string]struct{}, len(group.RCNOs))
-	for _, rcno := range group.RCNOs {
-		wanted[rcno] = struct{}{}
+	type recordsByDate struct {
+		date    time.Time
+		records []PendingRecord
 	}
-	resolved := make(map[string]Resolution, len(group.RCNOs))
+	dated := make(map[string]*recordsByDate)
+	for _, record := range group.Records {
+		if record.ProcessDate.IsZero() {
+			continue
+		}
+		key := record.ProcessDate.Format(time.DateOnly)
+		if dated[key] == nil {
+			dated[key] = &recordsByDate{date: record.ProcessDate}
+		}
+		dated[key].records = append(dated[key].records, record)
+	}
+	dates := make([]string, 0, len(dated))
+	for key := range dated {
+		dates = append(dates, key)
+	}
+	sort.Strings(dates)
+
+	resolved := make(map[string]Resolution, len(group.Records))
 	detailByCode := make(map[string]mfdscompany.BusinessDetail)
+	for _, key := range dates {
+		dateGroup := dated[key]
+		dateResolutions, err := s.resolveDateFromGallery(
+			ctx, group.BusinessName, dateGroup.date, dateGroup.records, candidateByCode, detailByCode,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for _, resolution := range dateResolutions {
+			if previous, exists := resolved[resolution.RCNO]; exists &&
+				previous.Importer.InternalBusinessCode != resolution.Importer.InternalBusinessCode {
+				return nil, fmt.Errorf("RCNO %s의 공식 업소코드가 서로 다릅니다", resolution.RCNO)
+			}
+			resolved[resolution.RCNO] = resolution
+		}
+	}
+	result := make([]Resolution, 0, len(resolved))
+	for _, record := range group.Records {
+		if resolution, exists := resolved[record.RCNO]; exists {
+			result = append(result, resolution)
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) resolveDateFromGallery(
+	ctx context.Context,
+	businessName string,
+	processDate time.Time,
+	records []PendingRecord,
+	candidateByCode map[string]officialCandidate,
+	detailByCode map[string]mfdscompany.BusinessDetail,
+) ([]Resolution, error) {
+	wanted := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		wanted[record.RCNO] = struct{}{}
+	}
+	resolved := make(map[string]Resolution, len(records))
 	for pageNo := 1; ; pageNo++ {
 		if err := s.wait(ctx); err != nil {
 			return nil, err
 		}
 		page, err := s.source.SearchGallery(ctx, mfdscompany.GallerySearchRequest{
-			Page: pageNo, Limit: s.pageSize, BusinessName: group.BusinessName,
-			FromDate: group.ProcessDate, ToDate: group.ProcessDate,
+			Page: pageNo, Limit: s.pageSize, BusinessName: businessName,
+			FromDate: processDate, ToDate: processDate,
 		})
 		if err != nil {
 			return nil, err
@@ -152,7 +229,7 @@ func (s *Service) resolveFromGallery(ctx context.Context, group PendingGroup, ca
 			if err != nil {
 				return nil, err
 			}
-			if _, exists := wanted[gallery.RCNO]; !exists || strings.TrimSpace(gallery.BusinessName) != group.BusinessName {
+			if _, exists := wanted[gallery.RCNO]; !exists || strings.TrimSpace(gallery.BusinessName) != businessName {
 				continue
 			}
 			candidate, exists := candidateByCode[gallery.InternalBusinessCode]
@@ -175,7 +252,7 @@ func (s *Service) resolveFromGallery(ctx context.Context, group PendingGroup, ca
 			}
 			gallerySource := gallery.Source
 			resolved[gallery.RCNO] = Resolution{
-				RCNO: gallery.RCNO, BusinessName: group.BusinessName, Importer: detail,
+				RCNO: gallery.RCNO, BusinessName: businessName, Importer: detail,
 				ListSource: candidate.source, GallerySource: &gallerySource,
 			}
 		}
@@ -184,8 +261,8 @@ func (s *Service) resolveFromGallery(ctx context.Context, group PendingGroup, ca
 		}
 	}
 	result := make([]Resolution, 0, len(resolved))
-	for _, rcno := range group.RCNOs {
-		if resolution, exists := resolved[rcno]; exists {
+	for _, record := range records {
+		if resolution, exists := resolved[record.RCNO]; exists {
 			result = append(result, resolution)
 		}
 	}

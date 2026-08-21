@@ -72,6 +72,9 @@ func (s *Scraper) Search(ctx context.Context, request SearchRequest) (SearchPage
 		"bsnOfcName":   {request.BusinessName},
 		"selBsshSttus": {request.OperatingState},
 	}
+	if request.TotalSnapshot != nil {
+		query.Set("totalCnt", strconv.Itoa(*request.TotalSnapshot))
+	}
 	body, source, err := s.fetchHTML(ctx, ListPath, query)
 	if err != nil {
 		return SearchPage{}, err
@@ -214,6 +217,12 @@ func validateSearchRequest(request SearchRequest) error {
 	if strings.TrimSpace(request.BusinessName) != request.BusinessName ||
 		strings.TrimSpace(request.OperatingState) != request.OperatingState {
 		return errors.New("검색 조건은 앞뒤 공백을 포함할 수 없습니다")
+	}
+	if request.Page == 1 && request.TotalSnapshot != nil {
+		return errors.New("국내영업자 첫 페이지에는 total snapshot을 지정할 수 없습니다")
+	}
+	if request.Page > 1 && (request.TotalSnapshot == nil || *request.TotalSnapshot <= 0) {
+		return errors.New("국내영업자 추가 페이지에는 양수 total snapshot이 필요합니다")
 	}
 	return nil
 }

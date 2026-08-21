@@ -9,8 +9,24 @@ import (
 
 type PendingGroup struct {
 	BusinessName string
-	ProcessDate  time.Time
-	RCNOs        []string
+	Records      []PendingRecord
+}
+
+type PendingRecord struct {
+	RCNO        string
+	ProcessDate time.Time
+}
+
+type ExactImporter struct {
+	ID               uint64
+	SourceObservedAt time.Time
+}
+
+type ExactResolution struct {
+	RCNO             string
+	BusinessName     string
+	ImporterID       uint64
+	SourceObservedAt time.Time
 }
 
 type Resolution struct {
@@ -30,6 +46,8 @@ type Summary struct {
 
 type Store interface {
 	ListPendingImporterGroups(context.Context, uint64) ([]PendingGroup, error)
+	FindExactImporter(context.Context, string) (*ExactImporter, error)
+	SaveExactImporterResolutions(context.Context, []ExactResolution) error
 	SaveImporterResolutions(context.Context, []Resolution) error
 }
 

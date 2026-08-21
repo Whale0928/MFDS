@@ -93,8 +93,11 @@ func TestScraper_SearchAndDetail_ParsesOfficialFieldsAndMetadata(t *testing.T) {
 }
 
 func TestScraper_Search_RejectsInexactResultCount(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "text/html")
+		if request.URL.Query().Get("totalCnt") != "3" {
+			t.Fatalf("totalCnt = %q", request.URL.Query().Get("totalCnt"))
+		}
 		_, _ = writer.Write([]byte(strings.Replace(listFixture, "총 <strong>2</strong>건", "총 <strong>3</strong>건", 1)))
 	}))
 	defer server.Close()
@@ -103,7 +106,8 @@ func TestScraper_Search_RejectsInexactResultCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := scraper.Search(context.Background(), SearchRequest{Page: 2, Limit: 2, IndustryCode: "141"}); err == nil || !strings.Contains(err.Error(), "정확하지 않습니다") {
+	total := 3
+	if _, err := scraper.Search(context.Background(), SearchRequest{Page: 2, Limit: 2, TotalSnapshot: &total, IndustryCode: "141"}); err == nil || !strings.Contains(err.Error(), "정확하지 않습니다") {
 		t.Fatalf("Search() error = %v", err)
 	}
 }

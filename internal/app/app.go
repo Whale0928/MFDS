@@ -74,7 +74,7 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			}
 			importerService, err := importerresolution.NewService(store, companyScraper, importerresolution.Options{
 				PageSize: mfdscompany.MaximumPageSize, Delay: requestDelay,
-				Industry: "141", State: "ING",
+				Industry: "141",
 			})
 			if err != nil {
 				return result, err

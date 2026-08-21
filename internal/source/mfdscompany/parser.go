@@ -42,6 +42,12 @@ func parseSearchPage(body []byte, request SearchRequest) (SearchPage, error) {
 	if err != nil {
 		return SearchPage{}, err
 	}
+	if request.Page > 1 && total != *request.TotalSnapshot {
+		return SearchPage{}, fmt.Errorf(
+			"국내영업자 응답 total이 snapshot과 다릅니다: expected=%d actual=%d",
+			*request.TotalSnapshot, total,
+		)
+	}
 	bodyNodes := directChildrenByTag(table, "tbody")
 	if len(bodyNodes) != 1 {
 		return SearchPage{}, fmt.Errorf("국내영업자 목록 tbody 수가 %d개입니다", len(bodyNodes))

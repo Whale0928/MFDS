@@ -40,6 +40,7 @@ type Options struct {
 type SearchRequest struct {
 	Page           int
 	Limit          int
+	TotalSnapshot  *int
 	IndustryCode   string
 	BusinessName   string
 	OperatingState string
