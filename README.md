@@ -50,6 +50,7 @@ task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
+task run -- normalize --force --limit 20000
 
 task run -- match --all --dry-run
 task run -- match --all
@@ -60,6 +61,10 @@ regardless of its current state, while `--dry-run` changes no ledger row,
 declaration, lease, or timestamp. States are `PENDING`, `STALE`, `NORMALIZED`,
 `PARTIAL`, `REVIEW_REQUIRED`, and `UNPARSED`. Source `mfds_items` are never updated
 or deleted.
+`--force` marks existing terminal declarations `STALE` once and re-normalizes up
+to `--limit` rows. Source data, prior derived values, official importer links,
+and manual matching choices remain until replacement results are stored. It cannot
+be combined with `--rcno` or `--dry-run`.
 `collect-recent` takes no arguments and append-only collects the seven calendar
 days ending today in KST. Repeated runs intentionally preserve overlapping
 observations. It does not run normalization.
@@ -90,6 +95,21 @@ by `task setup`. Flyway migrations live in
 `git.environment-variables/storage/db/migration`. MFDS-only sqlc schema, queries,
 and generated code live in `git.secrets`.
 
+V12 is the historical migration that introduced the importer seed. V13 removes
+the retired unmatched-importer queue and records official evidence in
+`mfds_importer_rcno_links`. The checksum of an already-applied V12 is not changed.
+
+After a web-ledger job completes, the application groups the current job and all
+historical unresolved declarations by the exact source trade name. One exact
+`mfds_importers` row is reused and linked before any page request. Otherwise the
+official domestic-business page is searched once per trade name. One exact page
+candidate is stored and linked as `PAGE_NAME`; for multiple candidates, only a
+product gallery detail that exposes both the same RCNO and a matching domestic-
+business code is stored and linked as `PAGE_RCNO`. No result, unexpected page
+failure, or no matching RCNO evidence creates an importer row. The declaration
+stays unlinked, and the immutable source ledger and normalized importer text
+remain intact.
+
 ## Structure
 
 ```text
@@ -97,7 +117,9 @@ cmd/                         Cobra commands
 internal/app/                application wiring
 internal/config/             YAML and database environment loading
 internal/source/mfdsweb/     HTTP client and HTML parser
+internal/source/mfdscompany/ official domestic-business HTML client/parser
 internal/usecase/weblist/    collection and RCNO reconciliation
+internal/usecase/importerresolution/ official-page RCNO importer resolution
 internal/normalization/      pure normalization rules and parsers
 internal/matching/           immutable alcohol, distillery, and region matcher
 internal/usecase/normalization/ normalization batch and state transitions

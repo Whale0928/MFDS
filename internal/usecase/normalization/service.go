@@ -22,6 +22,7 @@ type Command struct {
 	Limit  int
 	RCNO   string
 	DryRun bool
+	Force  bool
 }
 
 type Summary struct {
@@ -70,6 +71,11 @@ func (s *Service) Execute(ctx context.Context, command Command) (Summary, error)
 		sources, err = s.store.Preview(ctx, request)
 	} else {
 		if err = s.store.SyncDeclarations(ctx); err == nil {
+			if command.Force {
+				err = s.store.ForceRequeue(ctx)
+			}
+		}
+		if err == nil {
 			sources, err = s.store.Claim(ctx, request)
 		}
 	}
@@ -135,6 +141,12 @@ func (s *Service) Execute(ctx context.Context, command Command) (Summary, error)
 func (s *Service) claimRequest(command Command) (ClaimRequest, error) {
 	if command.Limit < 0 {
 		return ClaimRequest{}, errors.New("limit은 0보다 크거나 같아야 합니다")
+	}
+	if command.Force && strings.TrimSpace(command.RCNO) != "" {
+		return ClaimRequest{}, errors.New("force와 rcno는 함께 사용할 수 없습니다")
+	}
+	if command.Force && command.DryRun {
+		return ClaimRequest{}, errors.New("force와 dry-run은 함께 사용할 수 없습니다")
 	}
 	if command.Limit > 0 && strings.TrimSpace(command.RCNO) != "" {
 		return ClaimRequest{}, errors.New("limit과 rcno는 함께 사용할 수 없습니다")

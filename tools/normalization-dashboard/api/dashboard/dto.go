@@ -24,21 +24,26 @@ type overviewResponse struct {
 }
 
 type declarationListItem struct {
-	RCNO              string   `json:"rcno"`
-	SourceName        string   `json:"source_name"`
-	NormalizedName    string   `json:"normalized_name"`
-	Key1              string   `json:"key_1"`
-	Key2              string   `json:"key_2"`
-	Key3              string   `json:"key_3"`
-	Status            string   `json:"status"`
-	ProcessedAt       string   `json:"processed_at"`
-	ItemName          string   `json:"item_name"`
-	ImporterName      string   `json:"importer_name"`
-	Country           string   `json:"country"`
-	AlcoholMatched    bool     `json:"alcohol_matched"`
-	DistilleryMatched bool     `json:"distillery_matched"`
-	RegionMatched     bool     `json:"region_matched"`
-	ReasonCodes       []string `json:"reason_codes"`
+	RCNO                 string   `json:"rcno"`
+	SourceName           string   `json:"source_name"`
+	NormalizedName       string   `json:"normalized_name"`
+	Key1                 string   `json:"key_1"`
+	Key2                 string   `json:"key_2"`
+	Key3                 string   `json:"key_3"`
+	Status               string   `json:"status"`
+	ProcessedAt          string   `json:"processed_at"`
+	ItemName             string   `json:"item_name"`
+	ImporterName         string   `json:"importer_name"`
+	SourceImporterName   string   `json:"source_importer_name"`
+	ImporterID           int64    `json:"importer_id"`
+	ImporterBusinessName string   `json:"importer_business_name"`
+	ImporterLinked       bool     `json:"importer_linked"`
+	ImporterLinkSource   string   `json:"importer_link_source"`
+	Country              string   `json:"country"`
+	AlcoholMatched       bool     `json:"alcohol_matched"`
+	DistilleryMatched    bool     `json:"distillery_matched"`
+	RegionMatched        bool     `json:"region_matched"`
+	ReasonCodes          []string `json:"reason_codes"`
 }
 type declarationListResponse struct {
 	Declarations []declarationListItem `json:"declarations"`
@@ -47,6 +52,127 @@ type declarationListResponse struct {
 	Total        int64                 `json:"total"`
 	TotalPages   int                   `json:"total_pages"`
 }
+
+type importerListItem struct {
+	LicenseNo       string `json:"license_no"`
+	BusinessName    string `json:"business_name"`
+	Representative  string `json:"representative_name"`
+	PermitDate      string `json:"permit_date"`
+	InstitutionName string `json:"institution_name"`
+	Address         string `json:"address"`
+	Telephone       string `json:"telephone"`
+	IndustryName    string `json:"industry_name"`
+}
+
+type importerGroupListItem struct {
+	ImporterID           int64  `json:"importer_id"`
+	OfficialBusinessCode string `json:"official_business_code"`
+	LicenseNo            string `json:"license_no"`
+	BusinessName         string `json:"business_name"`
+	Representative       string `json:"representative_name"`
+	PermitDate           string `json:"permit_date"`
+	InstitutionName      string `json:"institution_name"`
+	PrimaryAddress       string `json:"primary_address"`
+	Telephone            string `json:"telephone"`
+	IndustryName         string `json:"industry_name"`
+	OperatingStatus      string `json:"operating_status"`
+	SourceDetailURL      string `json:"source_detail_url"`
+	Description          string `json:"description"`
+	AdminStatus          string `json:"admin_status"`
+	SourceObservedAt     string `json:"source_observed_at"`
+	UpdatedAt            string `json:"updated_at"`
+	DeclarationCount     int64  `json:"declaration_count"`
+	ProductCount         int64  `json:"product_count"`
+	FirstImportDate      string `json:"first_import_date"`
+	LastImportDate       string `json:"last_import_date"`
+}
+
+type importerListResponse struct {
+	Importers  []importerGroupListItem `json:"importers"`
+	Page       int                     `json:"page"`
+	PageSize   int                     `json:"page_size"`
+	Total      int64                   `json:"total"`
+	TotalPages int                     `json:"total_pages"`
+}
+
+type importerStatistics struct {
+	DeclarationCount int64  `json:"declaration_count"`
+	ProductCount     int64  `json:"product_count"`
+	FirstImportDate  string `json:"first_import_date"`
+	LastImportDate   string `json:"last_import_date"`
+}
+
+type importerDetailResponse struct {
+	ImporterID   int64              `json:"importer_id"`
+	BusinessName string             `json:"business_name"`
+	Profile      importerProfile    `json:"profile"`
+	Statistics   importerStatistics `json:"statistics"`
+}
+
+type importerProfile struct {
+	ImporterID            int64  `json:"importer_id"`
+	OfficialBusinessCode  string `json:"official_business_code"`
+	LicenseNo             string `json:"license_no"`
+	BusinessName          string `json:"business_name"`
+	BusinessNameKeySHA256 string `json:"business_name_key_sha256"`
+	Representative        string `json:"representative_name"`
+	PermitDate            string `json:"permit_date"`
+	InstitutionName       string `json:"institution_name"`
+	PrimaryAddress        string `json:"primary_address"`
+	Telephone             string `json:"telephone"`
+	IndustryName          string `json:"industry_name"`
+	OperatingStatus       string `json:"operating_status"`
+	SourceListURL         string `json:"source_list_url"`
+	SourceDetailURL       string `json:"source_detail_url"`
+	SourceListSHA256      string `json:"source_list_sha256"`
+	SourceDetailSHA256    string `json:"source_detail_sha256"`
+	SourceObservedAt      string `json:"source_observed_at"`
+	Description           string `json:"description"`
+	AdminNote             string `json:"admin_note"`
+	AdminStatus           string `json:"admin_status"`
+	ReviewedBy            string `json:"reviewed_by"`
+	ReviewedAt            string `json:"reviewed_at"`
+	CreatedAt             string `json:"created_at"`
+	UpdatedAt             string `json:"updated_at"`
+}
+
+type importerProductGroup struct {
+	ProductKey       string `json:"product_key"`
+	ProductName      string `json:"product_name"`
+	DeclarationCount int64  `json:"declaration_count"`
+	FirstImportDate  string `json:"first_import_date"`
+	LastImportDate   string `json:"last_import_date"`
+}
+
+type importerProductPage struct {
+	Products   []importerProductGroup `json:"products"`
+	Page       int                    `json:"page"`
+	PageSize   int                    `json:"page_size"`
+	Total      int64                  `json:"total"`
+	TotalPages int                    `json:"total_pages"`
+}
+
+type importerLedgerItem struct {
+	RCNO              string `json:"rcno"`
+	SourceName        string `json:"source_name"`
+	SourceNameEnglish string `json:"source_name_english"`
+	ProcessedAt       string `json:"processed_at"`
+	ItemName          string `json:"item_name"`
+	ManufacturerName  string `json:"manufacturer_name"`
+	Country           string `json:"country"`
+	Volume            string `json:"volume"`
+	ABV               string `json:"abv"`
+	LinkSource        string `json:"link_source"`
+}
+
+type importerLedgerPage struct {
+	Declarations []importerLedgerItem `json:"declarations"`
+	Page         int                  `json:"page"`
+	PageSize     int                  `json:"page_size"`
+	Total        int64                `json:"total"`
+	TotalPages   int                  `json:"total_pages"`
+}
+
 type declarationDetail struct {
 	RCNO                  string                    `json:"rcno"`
 	SourceName            string                    `json:"source_name"`
@@ -59,6 +185,11 @@ type declarationDetail struct {
 	ProcessedAt           string                    `json:"processed_at"`
 	ItemName              string                    `json:"item_name"`
 	ImporterName          string                    `json:"importer_name"`
+	SourceImporterName    string                    `json:"source_importer_name"`
+	ImporterID            int64                     `json:"importer_id"`
+	ImporterBusinessName  string                    `json:"importer_business_name"`
+	ImporterLinked        bool                      `json:"importer_linked"`
+	ImporterLinkSource    string                    `json:"importer_link_source"`
 	Country               string                    `json:"country"`
 	Fields                map[string]string         `json:"fields"`
 	Groups                []detailGroup             `json:"groups"`

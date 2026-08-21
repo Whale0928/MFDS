@@ -162,6 +162,8 @@ type Remaining struct {
 type Store interface {
 	// SyncDeclarations creates PENDING declarations and refreshes latest source references.
 	SyncDeclarations(context.Context) error
+	// ForceRequeue marks existing terminal declarations stale without changing source or derived values.
+	ForceRequeue(context.Context) error
 	// Claim returns PENDING/STALE work, or force-selects exactly one RCNO.
 	Claim(context.Context, ClaimRequest) ([]Source, error)
 	// Preview is read-only and must not acquire a lease or modify attempts.

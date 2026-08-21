@@ -90,4 +90,14 @@ describe('DetailDrawer', () => {
     expect(html).not.toContain('일반 정제')
     expect(html).not.toContain('빈 일반 필드')
   })
+
+  it('연결된정제수입사와양방향탐색버튼을표시한다', () => {
+    const linked: Declaration = { ...declaration, source_importer_name: '(주)수입사', importer_id: 7, importer_business_name: '(주)수입사', importer_linked: true }
+    const html = renderToStaticMarkup(<DetailDrawer declaration={linked} onClose={() => {}} onOpenImporter={() => {}} />)
+
+    expect(html).toContain('원장 수입사')
+    expect(html).toContain('정제 수입사')
+		expect(html).toContain('ID 7 · 공식 상호 단일 후보')
+    expect(html).toContain('수입사 모든 정보 보기')
+  })
 })

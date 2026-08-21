@@ -45,7 +45,7 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
 	}
-	for _, removed := range []string{"all", "api", "completion", "config", "db", "run", "verify", "web"} {
+	for _, removed := range []string{"all", "api", "completion", "config", "db", "run", "sync-company-registry", "verify", "web"} {
 		if strings.Contains(output.String(), "\n  "+removed+" ") {
 			t.Fatalf("removed command %q remains in output = %q", removed, output.String())
 		}
@@ -143,8 +143,11 @@ func writeCLIConfig(t *testing.T) (string, string) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	envFile := filepath.Join(dir, config.DefaultEnvFile)
+	if err := os.MkdirAll(filepath.Dir(envFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	configFile := filepath.Join(dataDir, "config.yaml")
-	envFile := filepath.Join(dir, ".env.local")
 	yaml := `
 timezone: Asia/Seoul
 web:

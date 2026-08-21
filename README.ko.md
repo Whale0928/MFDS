@@ -50,6 +50,7 @@ task run -- normalize
 task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
+task run -- normalize --force --limit 20000
 
 task run -- match --all --dry-run
 task run -- match --all
@@ -57,6 +58,10 @@ task run -- match --all
 
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
 재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
+`--force`는 기존 terminal 정제 행을 한 번만 `STALE`로 되돌린 뒤 지정한
+`--limit` 범위로 재정제합니다. 원본·기존 정제값·공식 수입사 연결과 수동
+매칭 선택은 새 결과가 저장되기 전까지 보존됩니다. `--force`는 `--rcno`,
+`--dry-run`과 함께 사용할 수 없습니다.
 정제 상태는 `PENDING`, `STALE`, `NORMALIZED`, `PARTIAL`, `REVIEW_REQUIRED`,
 `UNPARSED`로 구분합니다. 원문 `mfds_items`는 수정하거나 삭제하지 않습니다.
 `collect-recent`는 인자 없이 KST 오늘을 포함한 최근 7일을 append-only로
@@ -89,6 +94,18 @@ Flyway migration은 `git.environment-variables/storage/db/migration`에서
 관리합니다. MFDS 전용 sqlc 입력 스키마·쿼리와 생성 코드는 `git.secrets`에서
 관리합니다.
 
+V12는 과거 수입사 seed를 도입한 이력이고, V13은 폐기된 미매칭 관리 큐를 제거한 뒤
+`mfds_importer_rcno_links`로 공식 확인 근거를 분리합니다. 이미 적용된 V12의 checksum은
+바꾸지 않습니다.
+
+웹 원장 수집이 완료되면 이번 job에서 아직 RCNO 연결 근거가 없는 상호만 공식
+수입식품정보마루 화면으로 순차 조회합니다. 국내업소 exact 후보가 한 건이면 해당
+업소를 저장하고 `PAGE_NAME`으로 연결합니다. 후보가 복수이면 같은 처리일의 공식
+제품 갤러리 상세에서 RCNO와 국내업소 내부 코드를 함께 확인한 건만 `PAGE_RCNO`로
+연결합니다. 결과가 없거나 RCNO 근거가 일치하지 않으면 별도 상태나 큐를 만들지 않고
+`mfds_declarations.importer_id`를 NULL로 유지합니다. 원장 원문과 정제 문자열은 그대로
+보존합니다.
+
 ## 구조
 
 ```text
@@ -96,7 +113,9 @@ cmd/                         Cobra 명령
 internal/app/                애플리케이션 조립
 internal/config/             YAML과 DB 환경 변수 로딩
 internal/source/mfdsweb/     HTTP client와 HTML parser
+internal/source/mfdscompany/ 수입식품정보마루 국내업소 HTML client/parser
 internal/usecase/weblist/    수집과 RCNO 대조
+internal/usecase/importerresolution/ 공식 페이지 기반 RCNO 수입사 해소
 internal/normalization/      순수 정제 규칙과 파서
 internal/matching/           불변 alcohol·증류소·리전 matcher
 internal/usecase/normalization/ 정제 batch와 상태 전이

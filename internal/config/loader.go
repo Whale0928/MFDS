@@ -11,7 +11,7 @@ import (
 
 const (
 	DefaultConfigFile = "data/config.yaml"
-	DefaultEnvFile    = ".env.local"
+	DefaultEnvFile    = "git.secrets/project/mfds/.env"
 )
 
 type Loader struct {

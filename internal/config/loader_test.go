@@ -141,3 +141,23 @@ targets:
 	}
 	return configFile, envFile
 }
+
+func TestLoad_기본Env파일이서브모듈경로를가리킨다(t *testing.T) {
+	if DefaultEnvFile != "git.secrets/project/mfds/.env" {
+		t.Fatalf("DefaultEnvFile = %q", DefaultEnvFile)
+	}
+}
+
+func TestLoad_기본Env파일이없으면오류없이OS환경변수를사용한다(t *testing.T) {
+	clearBoundEnv(t)
+	configFile, _ := writeTestConfig(t)
+	t.Setenv("MYSQL_DSN", "os:os@tcp(localhost:3306)/os")
+
+	cfg, err := NewLoader().Load(configFile, DefaultEnvFile)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Database.DSN != "os:os@tcp(localhost:3306)/os" {
+		t.Fatalf("Database.DSN = %q", cfg.Database.DSN)
+	}
+}

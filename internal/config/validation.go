@@ -39,6 +39,14 @@ func (c Config) Validate() error {
 	return errors.Join(problems...)
 }
 
+func appendHTTPSURLProblem(problems []error, name, value string) []error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return append(problems, fmt.Errorf("%s이 유효한 HTTPS URL이 아닙니다", name))
+	}
+	return problems
+}
+
 func appendURLProblem(problems []error, name, value string) []error {
 	parsed, err := url.ParseRequestURI(value)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {

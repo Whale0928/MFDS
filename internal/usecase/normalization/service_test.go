@@ -3,6 +3,7 @@ package normalization
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,6 +30,65 @@ func TestService_일반실행_동기화후Terminal결과를저장한다(t *testi
 	if summary.Processed[StatusNormalized] != 1 || summary.SystemFailures != 0 ||
 		summary.RemainingPending != 4 || summary.RemainingStale != 2 {
 		t.Fatalf("summary = %+v", summary)
+	}
+}
+
+func TestService_Force_동기화후한번만Terminal을Requeue하고재정제한다(t *testing.T) {
+	// Given
+	store := &memoryStore{
+		claimed:   []Source{{RCNO: "R-1", ClaimOwner: "worker-1", ClaimAttempt: 1}},
+		remaining: Remaining{Pending: 0, Stale: 0},
+	}
+	parser := parserFunc(func(Source) (Result, error) { return Result{Status: StatusNormalized}, nil })
+	service := newTestService(t, store, parser)
+
+	// When
+	_, err := service.Execute(context.Background(), Command{Force: true, Limit: 12294})
+
+	// Then
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if store.forceRequeueCalls != 1 || !store.synced || !store.claimedCalled || store.claimedRequest.Limit != 12294 {
+		t.Fatalf("store = %+v", store)
+	}
+}
+
+func TestService_Force와RCNO동시지정_조합을거부한다(t *testing.T) {
+	// Given
+	store := &memoryStore{}
+	service := newTestService(t, store, parserFunc(func(Source) (Result, error) {
+		return Result{Status: StatusNormalized}, nil
+	}))
+
+	// When
+	_, err := service.Execute(context.Background(), Command{Force: true, RCNO: "R-1"})
+
+	// Then
+	if err == nil || !strings.Contains(err.Error(), "force와 rcno는 함께 사용할 수 없습니다") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if store.forceRequeueCalls != 0 || store.synced || store.claimedCalled {
+		t.Fatalf("store = %+v", store)
+	}
+}
+
+func TestService_ForceDryRun_조합을거부한다(t *testing.T) {
+	// Given
+	store := &memoryStore{}
+	service := newTestService(t, store, parserFunc(func(Source) (Result, error) {
+		return Result{Status: StatusNormalized}, nil
+	}))
+
+	// When
+	_, err := service.Execute(context.Background(), Command{Force: true, DryRun: true})
+
+	// Then
+	if err == nil || !strings.Contains(err.Error(), "force와 dry-run은 함께 사용할 수 없습니다") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if store.forceRequeueCalls != 0 || store.synced || store.previewed || store.claimedCalled {
+		t.Fatalf("store = %+v", store)
 	}
 }
 
@@ -149,21 +209,27 @@ func (f parserFunc) Normalize(source Source) (Result, error) {
 }
 
 type memoryStore struct {
-	synced         bool
-	claimedCalled  bool
-	previewed      bool
-	claimed        []Source
-	preview        []Source
-	claimedRequest ClaimRequest
-	completed      []Completion
-	failed         []Failure
-	remaining      Remaining
-	syncErr        error
+	synced            bool
+	claimedCalled     bool
+	previewed         bool
+	claimed           []Source
+	preview           []Source
+	claimedRequest    ClaimRequest
+	completed         []Completion
+	failed            []Failure
+	remaining         Remaining
+	syncErr           error
+	forceRequeueCalls int
 }
 
 func (s *memoryStore) SyncDeclarations(context.Context) error {
 	s.synced = true
 	return s.syncErr
+}
+
+func (s *memoryStore) ForceRequeue(context.Context) error {
+	s.forceRequeueCalls++
+	return nil
 }
 
 func (s *memoryStore) Claim(_ context.Context, request ClaimRequest) ([]Source, error) {

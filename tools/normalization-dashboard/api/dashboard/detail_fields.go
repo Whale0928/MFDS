@@ -78,6 +78,8 @@ var detailColumns = []detailColumn{
 	{"관리 번호", "COALESCE(CAST(expiry_end AS CHAR), '')", "소비기한 종료", "소비기한 범위의 종료일입니다."},
 
 	{"수입사와 제조사", "COALESCE(importer_base_name, '')", "수입사 정제명", "주식회사, (주) 같은 표기를 정리한 수입사 이름입니다."},
+	{"수입사와 제조사", "COALESCE(CAST(declaration_v3.importer_id AS CHAR), '')", "정제 수입사 ID", "공식 업체정보와 원장 수입사명이 완전히 일치해 연결된 정제 수입사 식별자입니다."},
+	{"수입사와 제조사", "COALESCE(linked_importer.business_name, '')", "공식 상호", "정제 수입사 원장에서 확인한 동일 상호입니다. 값이 없으면 공식 업체정보와 연결되지 않은 신고입니다."},
 	{"수입사와 제조사", "COALESCE(importer_search_key, '')", "수입사 검색용 이름", "같은 수입사를 찾기 위한 비교 전용 형태입니다."},
 	{"수입사와 제조사", "COALESCE(legal_entity_type, '')", "법인 형태", "주식회사, 유한회사처럼 원문에서 떼어낸 법인 표기입니다."},
 	{"수입사와 제조사", "COALESCE(overseas_establishment_search_key, '')", "해외 제조업소 검색용 이름", "해외 제조업소를 비교하기 위한 전용 형태입니다."},
@@ -126,7 +128,7 @@ var detailColumns = []detailColumn{
 	{"정제 이력", "COALESCE(DATE_FORMAT(normalized_at, '%Y-%m-%d %H:%i'), '')", "정제 실행 시각", "이 건을 마지막으로 정제한 시각입니다."},
 	{"정제 이력", "COALESCE(LEFT(HEX(sku_candidate_key_sha256), 12), '')", "같은 제품 묶음 코드", "제품 이름과 병 용량 등이 같은 건끼리 붙는 코드입니다. 같은 코드끼리는 같은 제품일 가능성이 있다는 뜻이지 확정은 아닙니다."},
 	{"정제 이력", "COALESCE(review_status, '')", "확인 상태", "사람이 이 건을 확인했는지 여부입니다."},
-	{"정제 이력", "COALESCE(reviewed_by, '')", "확인한 사람", "이 건을 확인한 담당자입니다."},
-	{"정제 이력", "COALESCE(DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i'), '')", "확인 시각", "사람이 이 건을 확인한 시각입니다."},
+	{"정제 이력", "COALESCE(declaration_v3.reviewed_by, '')", "확인한 사람", "이 건을 확인한 담당자입니다."},
+	{"정제 이력", "COALESCE(DATE_FORMAT(declaration_v3.reviewed_at, '%Y-%m-%d %H:%i'), '')", "확인 시각", "사람이 이 건을 확인한 시각입니다."},
 	{"정제 이력", "COALESCE(review_note, '')", "확인 메모", "확인하면서 남긴 메모입니다."},
 }

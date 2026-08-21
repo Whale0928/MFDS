@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import { date, fieldLabel, number, reasonLabel, statusLabel } from './format'
 import { BarChart } from './components/BarChart'
 import { DetailDrawer } from './components/DetailDrawer'
 import { Hint, Term } from './components/Hint'
+import { ImporterDetailDialog, ImporterList } from './components/ImporterList'
 import { hintFor } from './glossary'
 import { StatusChip } from './components/StatusChip'
-import type { Declaration, DeclarationPage, DeclarationSort, Filters, MatchFilter, Quality, SortOrder } from './types'
+import type { Declaration, DeclarationPage, DeclarationSort, Filters, ImporterGroup, ImporterLinkFilter, MatchFilter, Quality, SortOrder } from './types'
 
-type Section = 'browse' | 'review' | 'quality'
+type Section = 'browse' | 'importers' | 'review' | 'quality'
 type MatchingSort = `${DeclarationSort}:${SortOrder}`
 const PAGE_SIZE = 20
 const blankFilters: Filters = { statuses: [], item_names: [], importers: [], countries: [], reason_codes: [] }
+type BrowseFilters = { query: string; status: string; itemName: string; importer: string; country: string; reason: string; importerLink: ImporterLinkFilter; processedFrom: string; processedTo: string; alcoholMatch: MatchFilter; distilleryMatch: MatchFilter; regionMatch: MatchFilter; matchingSort: MatchingSort }
+const initialBrowseFilters: BrowseFilters = { query: '', status: '', itemName: '', importer: '', country: '', reason: '', importerLink: '', processedFrom: '', processedTo: '', alcoholMatch: '', distilleryMatch: '', regionMatch: '', matchingSort: 'processed_at:desc' }
 
 function useRemote<T>(load: () => Promise<T>, initial: T | null) {
   const [data, setData] = useState<T | null>(initial)
@@ -21,28 +24,28 @@ function useRemote<T>(load: () => Promise<T>, initial: T | null) {
   return { data, error, loading }
 }
 
+function useDebouncedValue<T>(value: T, delay: number) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => { const timer = window.setTimeout(() => setDebounced(value), delay); return () => window.clearTimeout(timer) }, [value, delay])
+  return debounced
+}
+
 export default function App() {
   const [section, setSection] = useState<Section>('browse')
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('')
-  const [itemName, setItemName] = useState('')
-  const [importer, setImporter] = useState('')
-  const [country, setCountry] = useState('')
-  const [reason, setReason] = useState('')
-  const [alcoholMatch, setAlcoholMatch] = useState<MatchFilter>('')
-  const [distilleryMatch, setDistilleryMatch] = useState<MatchFilter>('')
-  const [regionMatch, setRegionMatch] = useState<MatchFilter>('')
-  const [matchingSort, setMatchingSort] = useState<MatchingSort>('processed_at:desc')
+  const [browseFilters, setBrowseFilters] = useState<BrowseFilters>(initialBrowseFilters)
   const [page, setPage] = useState(1)
   const [reviewPage, setReviewPage] = useState(1)
   const [selected, setSelected] = useState<Declaration | null>(null)
+  const [selectedImporter, setSelectedImporter] = useState<Pick<ImporterGroup, 'importer_id' | 'business_name'> | null>(null)
+  const [activeOverlay, setActiveOverlay] = useState<'declaration' | 'importer' | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const filterLoad = useMemo(() => api.filters, [])
   const qualityLoad = useMemo(() => api.quality, [])
+  const debouncedQuery = useDebouncedValue(browseFilters.query, 300)
   const declarationLoad = useMemo(() => {
-    const [sort, order] = matchingSort.split(':') as [DeclarationSort, SortOrder]
-    return () => api.declarations({ page, page_size: PAGE_SIZE, q: query || undefined, status: status || undefined, item_name: itemName || undefined, importer: importer || undefined, country: country || undefined, reason: reason || undefined, alcohol_match: alcoholMatch || undefined, distillery_match: distilleryMatch || undefined, region_match: regionMatch || undefined, sort, order })
-  }, [page, query, status, itemName, importer, country, reason, alcoholMatch, distilleryMatch, regionMatch, matchingSort])
+    const [sort, order] = browseFilters.matchingSort.split(':') as [DeclarationSort, SortOrder]
+    return () => api.declarations({ page, page_size: PAGE_SIZE, q: debouncedQuery || undefined, status: browseFilters.status || undefined, item_name: browseFilters.itemName || undefined, importer: browseFilters.importer || undefined, country: browseFilters.country || undefined, reason: browseFilters.reason || undefined, importer_link: browseFilters.importerLink || undefined, from: browseFilters.processedFrom || undefined, to: browseFilters.processedTo || undefined, alcohol_match: browseFilters.alcoholMatch || undefined, distillery_match: browseFilters.distilleryMatch || undefined, region_match: browseFilters.regionMatch || undefined, sort, order })
+  }, [page, debouncedQuery, browseFilters.status, browseFilters.itemName, browseFilters.importer, browseFilters.country, browseFilters.reason, browseFilters.importerLink, browseFilters.processedFrom, browseFilters.processedTo, browseFilters.alcoholMatch, browseFilters.distilleryMatch, browseFilters.regionMatch, browseFilters.matchingSort])
   const reviewLoad = useMemo(() => () => api.declarations({ page: reviewPage, page_size: PAGE_SIZE, status: 'REVIEW_REQUIRED' }), [reviewPage])
   const filters = useRemote<Filters>(filterLoad, blankFilters)
   const quality = useRemote<Quality>(qualityLoad, null)
@@ -52,54 +55,85 @@ export default function App() {
     setDetailError(null)
     try {
       setSelected(await api.declaration(entry.rcno))
+      setActiveOverlay('declaration')
     } catch {
       setSelected(null)
       setDetailError('이 건의 상세 값을 불러오지 못했습니다.')
     }
   }
+  const openDetailByRCNO = async (rcno: string) => {
+    await openDetail({ rcno, source_name: rcno, status: '' })
+  }
+  const openImporter = (importerID: number, businessName: string) => {
+    if (!importerID || !businessName) return
+    setSelectedImporter({ importer_id: importerID, business_name: businessName })
+    setActiveOverlay('importer')
+  }
+  const closeDeclaration = useCallback(() => {
+    setSelected(null)
+    setActiveOverlay(selectedImporter ? 'importer' : null)
+  }, [selectedImporter])
+  const closeImporter = useCallback(() => {
+    setSelectedImporter(null)
+    setActiveOverlay(selected ? 'declaration' : null)
+  }, [selected])
+  const updateBrowseFilter = <K extends keyof BrowseFilters>(key: K, value: BrowseFilters[K]) => {
+    setBrowseFilters((current) => ({ ...current, [key]: value }))
+    setPage(1)
+  }
 
   return <main className="shell">
     <header className="masthead">
       <a className="brand" href="#browse" onClick={() => setSection('browse')}><span>MFDS</span><b>수입주류 신고 원장</b><i>시연용</i></a>
-      <nav aria-label="화면 이동">{([['browse', '데이터 탐색'], ['review', '확인 필요 목록'], ['quality', '전체 통계']] as Array<[Section, string]>).map(([key, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{label}</button>)}</nav>
+      <nav aria-label="화면 이동">{([['browse', '데이터 탐색'], ['importers', '수입사 목록'], ['review', '확인 필요 목록'], ['quality', '전체 통계']] as Array<[Section, string]>).map(([key, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}>{label}</button>)}</nav>
       <p className="masthead__note">읽기 전용 / 이 화면에서는 아무 값도 고치지 않습니다</p>
     </header>
 
-    {section === 'browse' && <BrowseView page={declarations.data} loading={declarations.loading} error={declarations.error} filters={filters.data ?? blankFilters} query={query} status={status} itemName={itemName} importer={importer} country={country} reason={reason} alcoholMatch={alcoholMatch} distilleryMatch={distilleryMatch} regionMatch={regionMatch} matchingSort={matchingSort} onQuery={setQuery} onStatus={setStatus} onItemName={setItemName} onImporter={setImporter} onCountry={setCountry} onReason={setReason} onAlcoholMatch={setAlcoholMatch} onDistilleryMatch={setDistilleryMatch} onRegionMatch={setRegionMatch} onMatchingSort={setMatchingSort} onOpen={openDetail} pageNumber={page} onPage={setPage} />}
-    {section === 'review' && <ReviewView quality={quality.data} loading={quality.loading || reviews.loading} error={quality.error ?? reviews.error} declarations={reviews.data} onOpen={openDetail} pageNumber={reviewPage} onPage={setReviewPage} />}
+    {section === 'browse' && <BrowseView page={declarations.data} loading={declarations.loading} error={declarations.error} filters={filters.data ?? blankFilters} values={browseFilters} onFilter={updateBrowseFilter} onReset={() => { setBrowseFilters(initialBrowseFilters); setPage(1) }} onOpen={openDetail} onOpenImporter={openImporter} pageNumber={page} onPage={setPage} />}
+    {section === 'importers' && <ImporterList onOpenImporter={(importer) => openImporter(importer.importer_id, importer.business_name)} />}
+    {section === 'review' && <ReviewView quality={quality.data} loading={quality.loading || reviews.loading} error={quality.error ?? reviews.error} declarations={reviews.data} onOpen={openDetail} onOpenImporter={openImporter} pageNumber={reviewPage} onPage={setReviewPage} />}
     {section === 'quality' && <QualityView quality={quality.data} loading={quality.loading} error={quality.error} />}
 
     {detailError && <div className="detail-error" role="alert"><span>{detailError}</span><button onClick={() => setDetailError(null)}>닫기</button></div>}
-    <DetailDrawer declaration={selected} onClose={() => setSelected(null)} />
+    {selected && <div className={`overlay-host${activeOverlay === 'declaration' ? '' : ' overlay-host--suspended'}`}><DetailDrawer declaration={selected} onClose={closeDeclaration} onOpenImporter={openImporter} /></div>}
+    {selectedImporter && <div className={`overlay-host${activeOverlay === 'importer' ? '' : ' overlay-host--suspended'}`}><ImporterDetailDialog importer={selectedImporter} active={activeOverlay === 'importer'} onClose={closeImporter} onOpenDeclaration={openDetailByRCNO} /></div>}
   </main>
 }
 
-function BrowseView({ page, loading, error, filters, query, status, itemName, importer, country, reason, alcoholMatch, distilleryMatch, regionMatch, matchingSort, onQuery, onStatus, onItemName, onImporter, onCountry, onReason, onAlcoholMatch, onDistilleryMatch, onRegionMatch, onMatchingSort, onOpen, pageNumber, onPage }: { page: DeclarationPage | null; loading: boolean; error: string | null; filters: Filters; query: string; status: string; itemName: string; importer: string; country: string; reason: string; alcoholMatch: MatchFilter; distilleryMatch: MatchFilter; regionMatch: MatchFilter; matchingSort: MatchingSort; onQuery: (value: string) => void; onStatus: (value: string) => void; onItemName: (value: string) => void; onImporter: (value: string) => void; onCountry: (value: string) => void; onReason: (value: string) => void; onAlcoholMatch: (value: MatchFilter) => void; onDistilleryMatch: (value: MatchFilter) => void; onRegionMatch: (value: MatchFilter) => void; onMatchingSort: (value: MatchingSort) => void; onOpen: (entry: Declaration) => void; pageNumber: number; onPage: (value: number) => void }) {
-  const totalPages = Math.max(1, Math.ceil((page?.total ?? 0) / PAGE_SIZE))
+function BrowseView({ page, loading, error, filters, values, onFilter, onReset, onOpen, onOpenImporter, pageNumber, onPage }: { page: DeclarationPage | null; loading: boolean; error: string | null; filters: Filters; values: BrowseFilters; onFilter: <K extends keyof BrowseFilters>(key: K, value: BrowseFilters[K]) => void; onReset: () => void; onOpen: (entry: Declaration) => void; onOpenImporter: (importerID: number, businessName: string) => void; pageNumber: number; onPage: (value: number) => void }) {
+  const totalPages = Math.max(1, page?.total_pages ?? 0)
+  const activeFilters = Object.entries(values).filter(([key, value]) => value && key !== 'matchingSort').length
   return <div className="page">
     <PageTitle title="식약처 원본과 정제 결과" copy="한 줄이 수입신고 한 건입니다. 줄을 누르면 그 건의 원본 값과 정제된 값을 빠짐없이 볼 수 있습니다." />
     <section className="filter-bar filter-bar--primary">
-      <label>검색<input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="제품명 또는 수입신고번호" /></label>
-      <SelectFilter label="정제 상태" term="정제" value={status} values={filters.statuses} labeller={statusLabel} onChange={onStatus} />
-      <SelectFilter label="품목" term="품목" value={itemName} values={filters.item_names} onChange={onItemName} />
-      <SelectFilter label="수입사" term="수입사" value={importer} values={filters.importers} onChange={onImporter} />
-      <SelectFilter label="제조 국가" term="제조 국가" value={country} values={filters.countries} onChange={onCountry} />
-      <SelectFilter label="확인 사유" term="확인 사유" value={reason} values={filters.reason_codes} labeller={reasonLabel} onChange={onReason} />
+      <label>통합 검색<input value={values.query} onChange={(event) => onFilter('query', event.target.value)} placeholder="제품명 · RCNO · 상호" maxLength={200} /></label>
+      <SelectFilter label="정제 상태" term="정제" value={values.status} values={filters.statuses} labeller={statusLabel} onChange={(value) => onFilter('status', value)} />
+      <SelectFilter label="품목" term="품목" value={values.itemName} values={filters.item_names} onChange={(value) => onFilter('itemName', value)} />
+      <SelectFilter label="수입사" term="수입사" value={values.importer} values={filters.importers} onChange={(value) => onFilter('importer', value)} />
+      <SelectFilter label="제조 국가" term="제조 국가" value={values.country} values={filters.countries} onChange={(value) => onFilter('country', value)} />
+      <SelectFilter label="확인 사유" term="확인 사유" value={values.reason} values={filters.reason_codes} labeller={reasonLabel} onChange={(value) => onFilter('reason', value)} />
       <span className="filter-bar__count">{number(page?.total)}건</span>
+    </section>
+    <section className="filter-bar ledger-filter-bar" aria-label="원장 관계와 기간 필터">
+      <div className="matching-filter-bar__title"><strong>원장 범위</strong><small>수입사 연결과 처리일</small></div>
+      <label>수입사 연결<select value={values.importerLink} onChange={(event) => onFilter('importerLink', event.target.value as ImporterLinkFilter)}><option value="">전체</option><option value="matched">정제 수입사 연결</option><option value="unlinked">미연결</option></select></label>
+      <label>처리일 시작<input type="date" value={values.processedFrom} max={values.processedTo || undefined} onChange={(event) => onFilter('processedFrom', event.target.value)} /></label>
+      <label>처리일 종료<input type="date" value={values.processedTo} min={values.processedFrom || undefined} onChange={(event) => onFilter('processedTo', event.target.value)} /></label>
+      <button className="filter-reset" type="button" onClick={onReset} disabled={activeFilters === 0}>필터 초기화 {activeFilters > 0 && `(${activeFilters})`}</button>
     </section>
     <section className="filter-bar matching-filter-bar" aria-label="BottleNote 매칭 필터">
       <div className="matching-filter-bar__title"><strong>BottleNote 후보</strong><small>1순위 후보 생성 여부</small></div>
-      <MatchSelect label="알코올 매칭" value={alcoholMatch} onChange={onAlcoholMatch} />
-      <MatchSelect label="증류소 매칭" value={distilleryMatch} onChange={onDistilleryMatch} />
-      <MatchSelect label="리전 매칭" value={regionMatch} onChange={onRegionMatch} />
-      <label>정렬<select value={matchingSort} onChange={(event) => onMatchingSort(event.target.value as MatchingSort)} aria-label="매칭 여부 정렬"><option value="processed_at:desc">최신 처리일순</option><option value="alcohol:desc">알코올 후보 있음 먼저</option><option value="alcohol:asc">알코올 후보 없음 먼저</option><option value="distillery:desc">증류소 후보 있음 먼저</option><option value="distillery:asc">증류소 후보 없음 먼저</option><option value="region:desc">리전 후보 있음 먼저</option><option value="region:asc">리전 후보 없음 먼저</option></select></label>
+      <MatchSelect label="알코올 매칭" value={values.alcoholMatch} onChange={(value) => onFilter('alcoholMatch', value)} />
+      <MatchSelect label="증류소 매칭" value={values.distilleryMatch} onChange={(value) => onFilter('distilleryMatch', value)} />
+      <MatchSelect label="리전 매칭" value={values.regionMatch} onChange={(value) => onFilter('regionMatch', value)} />
+      <label>정렬<select value={values.matchingSort} onChange={(event) => onFilter('matchingSort', event.target.value as MatchingSort)} aria-label="매칭 여부 정렬"><option value="processed_at:desc">최신 처리일순</option><option value="alcohol:desc">알코올 후보 있음 먼저</option><option value="alcohol:asc">알코올 후보 없음 먼저</option><option value="distillery:desc">증류소 후보 있음 먼저</option><option value="distillery:asc">증류소 후보 없음 먼저</option><option value="region:desc">리전 후보 있음 먼저</option><option value="region:asc">리전 후보 없음 먼저</option></select></label>
     </section>
     {loading && <Loading label="목록을 읽는 중" />}{error && <ErrorPanel message={error} />}
-    {page && <><DeclarationTable entries={page.declarations} onOpen={onOpen} /><div className="pagination"><button disabled={pageNumber <= 1} onClick={() => onPage(pageNumber - 1)}>이전</button><span>{pageNumber} / {totalPages}</span><button disabled={pageNumber >= totalPages} onClick={() => onPage(pageNumber + 1)}>다음</button></div></>}
+    {page && <><DeclarationTable entries={page.declarations} onOpen={onOpen} onOpenImporter={onOpenImporter} /><div className="pagination"><button disabled={pageNumber <= 1} onClick={() => onPage(pageNumber - 1)}>이전</button><span>{pageNumber} / {totalPages}</span><button disabled={pageNumber >= totalPages} onClick={() => onPage(pageNumber + 1)}>다음</button></div></>}
   </div>
 }
 
-function ReviewView({ quality, loading, error, declarations, onOpen, pageNumber, onPage }: { quality: Quality | null; loading: boolean; error: string | null; declarations: DeclarationPage | null; onOpen: (entry: Declaration) => void; pageNumber: number; onPage: (value: number) => void }) {
+function ReviewView({ quality, loading, error, declarations, onOpen, onOpenImporter, pageNumber, onPage }: { quality: Quality | null; loading: boolean; error: string | null; declarations: DeclarationPage | null; onOpen: (entry: Declaration) => void; onOpenImporter: (importerID: number, businessName: string) => void; pageNumber: number; onPage: (value: number) => void }) {
   const reviewItems = declarations?.declarations ?? []
   const reviewTotal = declarations?.total ?? 0
   const reviewPages = Math.max(1, Math.ceil(reviewTotal / PAGE_SIZE))
@@ -116,7 +150,7 @@ function ReviewView({ quality, loading, error, declarations, onOpen, pageNumber,
     </>}
     <section className="panel review-list">
       <div className="panel__head"><h2>확인 대상 목록 {number(reviewTotal)}건</h2><span className="muted">줄을 눌러 그 건의 값을 전부 확인</span></div>
-      {reviewItems.length ? <><DeclarationTable entries={reviewItems} onOpen={onOpen} compact /><div className="pagination"><button disabled={pageNumber <= 1} onClick={() => onPage(pageNumber - 1)}>이전</button><span>{pageNumber} / {reviewPages}</span><button disabled={pageNumber >= reviewPages} onClick={() => onPage(pageNumber + 1)}>다음</button></div></> : <p className="empty-inline">확인이 필요한 건이 없습니다.</p>}
+      {reviewItems.length ? <><DeclarationTable entries={reviewItems} onOpen={onOpen} onOpenImporter={onOpenImporter} compact /><div className="pagination"><button disabled={pageNumber <= 1} onClick={() => onPage(pageNumber - 1)}>이전</button><span>{pageNumber} / {reviewPages}</span><button disabled={pageNumber >= reviewPages} onClick={() => onPage(pageNumber + 1)}>다음</button></div></> : <p className="empty-inline">확인이 필요한 건이 없습니다.</p>}
     </section>
   </div>
 }
@@ -147,7 +181,7 @@ function QualityView({ quality, loading, error }: { quality: Quality | null; loa
   </div>
 }
 
-function DeclarationTable({ entries, onOpen, compact = false }: { entries: Declaration[]; onOpen: (entry: Declaration) => void; compact?: boolean }) {
+function DeclarationTable({ entries, onOpen, onOpenImporter, compact = false }: { entries: Declaration[]; onOpen: (entry: Declaration) => void; onOpenImporter?: (importerID: number, businessName: string) => void; compact?: boolean }) {
   if (!entries.length) return <div className="empty-state"><h2>조건에 맞는 신고 건이 없습니다.</h2><p>검색어나 필터를 바꿔 다시 확인하세요.</p></div>
   return <div className={`declaration-table ${compact ? 'declaration-table--compact' : ''}`}>
     <div className="declaration-table__header">
@@ -160,8 +194,10 @@ function DeclarationTable({ entries, onOpen, compact = false }: { entries: Decla
       <Hint text="이 건을 자동으로 어디까지 해석했는지입니다."><span>정제 상태</span></Hint>
       <Hint text="식약처가 이 신고 건을 처리한 날짜입니다."><span>처리일</span></Hint>
     </div>
-    {entries.map((entry) => <button className="declaration-row" key={entry.rcno} onClick={() => onOpen(entry)} aria-label={`${entry.source_name} 상세 열기`}>
-      <span data-label="원본 제품명" title={entry.source_name}>{entry.source_name}</span>
+    {entries.map((entry) => <div className="declaration-row" key={entry.rcno} onClick={() => onOpen(entry)}>
+      <span className="declaration-row__identity" data-label="원본 제품명" title={entry.source_name}><strong>{entry.source_name}</strong>{entry.importer_linked && entry.importer_id && entry.importer_business_name
+        ? <button type="button" className="importer-inline-link" onClick={(event) => { event.stopPropagation(); onOpenImporter?.(entry.importer_id!, entry.importer_business_name!) }}>수입사 · {entry.importer_business_name}</button>
+        : <small className="importer-inline-link importer-inline-link--missing">수입사 미연결 · {entry.source_importer_name || entry.importer_name || '원문 없음'}</small>}</span>
       <span data-label="정제된 이름" title={entry.normalized_name}>{entry.normalized_name || '—'}</span>
       <span data-label="제품 이름">{entry.key_1 || '—'}</span>
       <span data-label="병 하나 용량">{entry.key_2 || '—'}</span>
@@ -169,7 +205,8 @@ function DeclarationTable({ entries, onOpen, compact = false }: { entries: Decla
       <span data-label="BottleNote 후보"><MatchingRail entry={entry} /></span>
       <span data-label="정제 상태"><StatusChip status={entry.status} /></span>
       <span data-label="처리일">{date(entry.processed_at)}</span>
-    </button>)}
+      <button type="button" className="declaration-row__open" onClick={(event) => { event.stopPropagation(); onOpen(entry) }} aria-label={`${entry.source_name} 신고 상세 열기`} />
+    </div>)}
   </div>
 }
 
