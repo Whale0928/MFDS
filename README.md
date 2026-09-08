@@ -149,7 +149,7 @@ three hours after collection, after the collector's 30-minute start allowance an
 two-hour execution deadline. It still runs independently against existing pending
 or stale rows when collection fails.
 
-Development runs the signed `v0.1.0` release image with both schedules enabled.
+Development runs the signed `v0.1.1` release image with both schedules enabled.
 Its `mfds-secrets` Secret contains only `MYSQL_DSN`, is encrypted with SOPS in the
 environment repository, and points to the BottleNote development database. Flyway
 V13 and the release image's database health check were verified before enabling it.

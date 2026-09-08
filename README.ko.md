@@ -144,7 +144,7 @@ production 03:00/06:00 KST입니다. 두 실행 모두 `concurrencyPolicy: Forbi
 3시간 뒤에 시작합니다. 수집이 실패해도 기존 `PENDING` 또는 `STALE` 대상은 별도로
 정제합니다.
 
-development는 서명된 `v0.1.0` release image로 두 일정을 활성화했습니다.
+development는 서명된 `v0.1.1` release image로 두 일정을 활성화했습니다.
 `mfds-secrets` Secret은 `MYSQL_DSN`만 포함하고 환경 저장소에서 SOPS로 암호화하며,
 BottleNote development DB를 가리킵니다. 활성화 전에 Flyway V13과 release image의
 DB health를 확인했습니다.
