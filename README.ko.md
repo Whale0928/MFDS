@@ -149,12 +149,14 @@ development는 서명된 `v0.1.1` release image로 두 일정을 활성화했습
 BottleNote development DB를 가리킵니다. 활성화 전에 Flyway V13과 release image의
 DB health를 확인했습니다.
 
-production은 `replace-before-enable`과 두 일정의 `suspend: true`를 유지하고 있으며
-production `mfds-secrets` 리소스도 배포하지 않았습니다. production 활성화 전에는
-검토된 Git 변경으로 SOPS 암호화 Secret을 추가하고 immutable image tag를 선택하며,
-Flyway V13을 다시 검증해야 합니다. 또한 실측 유입량과 잔여 queue 지표로 일정과
-10,000건 처리 용량을 승인해야 합니다. Argo CD self-heal이 명령형 cluster 변경을
-되돌리며 Secret 값은 평문으로 저장하지 않습니다.
+production도 서명된 `v0.1.1` 이미지로 수집 03:00, 정규화 06:00 KST 일정을
+활성화했습니다. 운영 DB의 V11~V13을 확인하고 개발 원본 RCNO 13,111건을
+복제한 뒤 운영 기준으로 정규화·매칭을 다시 계산했습니다. 개발 알코올·증류소·리전
+ID는 이관하지 않았습니다. 상세 검증은 [운영 이관 기록](docs/2026.09.08%20MFDS%20운영%20이관%20기록.md)에 있습니다.
+
+운영 정규화는 `mfds-runtime-config` ConfigMap을 읽기 전용으로 마운트합니다.
+한 번에 최대 10,000건을 처리하는 동안 lease가 만료되지 않도록 `lease_duration: 2h`를
+사용하며 Job 제한도 2시간입니다. DB Secret은 SOPS 암호화로 관리합니다.
 
 HTTP 요청 제한 시간은 목록·수입사 조회 모두 60초입니다. 목록은 기존 날짜 단위
 재시도와 RCNO 일관성 검증을 유지합니다. 수입사 조회는 일시적 네트워크 오류와

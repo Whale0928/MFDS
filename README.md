@@ -154,12 +154,15 @@ Its `mfds-secrets` Secret contains only `MYSQL_DSN`, is encrypted with SOPS in t
 environment repository, and points to the BottleNote development database. Flyway
 V13 and the release image's database health check were verified before enabling it.
 
-Production remains at `replace-before-enable`, both schedules are `suspend: true`,
-and no production `mfds-secrets` resource is deployed. Before enabling production,
-add its SOPS-encrypted Secret through a reviewed Git change, select an immutable
-image tag, revalidate Flyway V13, and approve the schedule and 10,000-row capacity
-using observed inflow and remaining queue metrics. Imperative cluster edits are
-reverted by Argo CD self-heal, and Secret values are never stored in plaintext.
+Production runs signed `v0.1.1` with collection at 03:00 and normalization at 06:00
+KST. After verifying migrations V11–V13, 13,111 source RCNOs were copied from
+development and normalized/matched against production references. Development
+alcohol, distillery and region IDs were not transferred. See the
+[production migration record](docs/2026.09.08%20MFDS%20운영%20이관%20기록.md).
+
+Production normalization mounts `mfds-runtime-config` read-only and uses a 2-hour
+lease to cover batches of up to 10,000 records; the Job deadline is also 2 hours.
+Database credentials remain in a SOPS-encrypted Secret.
 
 Both list and importer HTTP requests have a 60-second timeout. List collection
 retains date-task retries and RCNO consistency checks. Importer groups retry transient
