@@ -1,9 +1,12 @@
 package weblist
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,6 +239,8 @@ func TestExecuteJob_Task첫요청일시실패_날짜전체를재시도한다(t *
 	store := &fakeJobStore{}
 	source := &fakeListSource{failFirst: true}
 	service := newTestService(t, store, source)
+	var logs bytes.Buffer
+	service.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 
 	result, err := service.ExecuteJob(context.Background(), JobCommand{
 		FromDate: "2025-03-28", ToDate: "2025-03-28", Workers: 1,
@@ -245,6 +250,11 @@ func TestExecuteJob_Task첫요청일시실패_날짜전체를재시도한다(t *
 	}
 	if result.Status != RunStatusCompleted {
 		t.Fatalf("status = %s", result.Status)
+	}
+	for _, want := range []string{`"msg":"collection_fetch_failed"`, `"job_id":1`, `"task_id":1`, `"attempt":1`, `"process_date":"2025-03-28"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("missing %s in %s", want, logs.String())
+		}
 	}
 	if store.failures != 1 {
 		t.Fatalf("failure count = %d, want 1", store.failures)

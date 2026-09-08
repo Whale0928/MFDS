@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"time"
 	_ "time/tzdata"
@@ -19,6 +20,7 @@ import (
 )
 
 func Run(ctx context.Context, out, errOut io.Writer) error {
+	logger := slog.New(slog.NewJSONHandler(errOut, nil))
 	root, err := cmd.NewRootCommand(cmd.Dependencies{
 		Loader: config.NewLoader(),
 		OpenDatabase: func(cfg config.DatabaseConfig) (cmd.Database, error) {
@@ -55,12 +57,13 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			service, err := weblist.NewService(store, mfdsweb.NewUsecaseAdapter(webClient), weblist.Options{
 				Targets: targets, PageSize: cfg.Web.ListPageSize, QPS: cfg.Web.QPS,
 				MaxAttempts: cfg.Retry.MaxAttempts, RetryDelays: cfg.Retry.Delays, Location: location,
-				WebBaseURL: cfg.Web.BaseURL,
+				WebBaseURL: cfg.Web.BaseURL, Logger: logger,
 			})
 			if err != nil {
 				return weblist.JobResult{}, err
 			}
 			result, err := service.ExecuteJob(ctx, command)
+			logger.InfoContext(ctx, "collection_finished", "job_id", result.RunID, "status", result.Status, "total_tasks", result.TotalPartitions, "completed_tasks", result.CompletedPartitions, "parsed_rows", result.ParsedRows, "new_rcno", result.NewRCNOCount)
 			if err != nil || result.Status != weblist.RunStatusCompleted {
 				return result, err
 			}
@@ -74,12 +77,14 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			}
 			importerService, err := importerresolution.NewService(store, companyScraper, importerresolution.Options{
 				PageSize: mfdscompany.MaximumPageSize, Delay: requestDelay,
-				Industry: "141",
+				Industry: "141", MaxAttempts: cfg.Retry.MaxAttempts, RetryDelays: cfg.Retry.Delays, Logger: logger,
 			})
 			if err != nil {
 				return result, err
 			}
-			if _, err := importerService.SyncJob(ctx, result.RunID); err != nil {
+			summary, err := importerService.SyncJob(ctx, result.RunID)
+			logger.InfoContext(ctx, "importer_sync_finished", "job_id", result.RunID, "groups", summary.Groups, "resolved", summary.Resolved, "unresolved", summary.Unresolved, "failed_groups", summary.FailedGroups, "failed_rcnos", summary.FailedRCNOs, "fatal", err != nil)
+			if err != nil {
 				return result, err
 			}
 			return result, nil

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,12 +16,15 @@ import (
 )
 
 type Service struct {
-	store    Store
-	source   Source
-	pageSize int
-	delay    time.Duration
-	industry string
-	state    string
+	maxAttempts int
+	retryDelays []time.Duration
+	logger      *slog.Logger
+	store       Store
+	source      Source
+	pageSize    int
+	delay       time.Duration
+	industry    string
+	state       string
 }
 
 type officialCandidate struct {
@@ -42,7 +47,24 @@ func NewService(store Store, source Source, options Options) (*Service, error) {
 	if industry == "" {
 		return nil, errors.New("수입사 해소 업종이 필요합니다")
 	}
-	return &Service{store: store, source: source, pageSize: options.PageSize, delay: options.Delay, industry: industry, state: state}, nil
+	if options.MaxAttempts == 0 {
+		options.MaxAttempts = 3
+	}
+	if options.MaxAttempts < 1 {
+		return nil, errors.New("수입사 최대 시도 횟수는 양수여야 합니다")
+	}
+	if len(options.RetryDelays) == 0 {
+		options.RetryDelays = []time.Duration{2 * time.Second, 5 * time.Second}
+	}
+	for _, delay := range options.RetryDelays {
+		if delay < 0 {
+			return nil, errors.New("재시도 간격은 음수일 수 없습니다")
+		}
+	}
+	if options.Logger == nil {
+		options.Logger = slog.New(slog.NewJSONHandler(io.Discard, nil))
+	}
+	return &Service{maxAttempts: options.MaxAttempts, retryDelays: append([]time.Duration(nil), options.RetryDelays...), logger: options.Logger, store: store, source: source, pageSize: options.PageSize, delay: options.Delay, industry: industry, state: state}, nil
 }
 
 func (s *Service) SyncJob(ctx context.Context, jobID uint64) (Summary, error) {
@@ -55,6 +77,9 @@ func (s *Service) SyncJob(ctx context.Context, jobID uint64) (Summary, error) {
 	}
 	summary := Summary{Groups: len(groups)}
 	for _, group := range groups {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
 		summary.RCNOs += len(group.Records)
 		exactImporter, err := s.store.FindExactImporter(ctx, group.BusinessName)
 		if err != nil {
@@ -74,8 +99,17 @@ func (s *Service) SyncJob(ctx context.Context, jobID uint64) (Summary, error) {
 			summary.Resolved += len(resolutions)
 			continue
 		}
-		resolutions, err := s.resolveGroup(ctx, group)
+		resolutions, err := s.resolveGroupWithRetry(ctx, jobID, group)
 		if err != nil {
+			if ctx.Err() != nil {
+				return summary, ctx.Err()
+			}
+			if mfdscompany.IsRetryable(err) {
+				summary.FailedGroups++
+				summary.FailedRCNOs += len(group.Records)
+				s.logger.WarnContext(ctx, "importer_group_deferred", "code", "IMPORTER_RETRY_EXHAUSTED", "job_id", jobID, "business_name", group.BusinessName, "rcno_count", len(group.Records), "attempts", s.maxAttempts)
+				continue
+			}
 			return summary, fmt.Errorf("수입사 %q 해소 실패: %w", group.BusinessName, err)
 		}
 		if err := s.store.SaveImporterResolutions(ctx, resolutions); err != nil {

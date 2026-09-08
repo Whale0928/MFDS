@@ -2,6 +2,7 @@ package importerresolution
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/bottle-note/mfds-crawler/internal/source/mfdscompany"
@@ -38,10 +39,12 @@ type Resolution struct {
 }
 
 type Summary struct {
-	Groups     int
-	RCNOs      int
-	Resolved   int
-	Unresolved int
+	FailedGroups int
+	FailedRCNOs  int
+	Groups       int
+	RCNOs        int
+	Resolved     int
+	Unresolved   int
 }
 
 type Store interface {
@@ -59,8 +62,11 @@ type Source interface {
 }
 
 type Options struct {
-	PageSize int
-	Delay    time.Duration
-	Industry string
-	State    string
+	MaxAttempts int
+	RetryDelays []time.Duration
+	Logger      *slog.Logger
+	PageSize    int
+	Delay       time.Duration
+	Industry    string
+	State       string
 }

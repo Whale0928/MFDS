@@ -13,7 +13,7 @@ const (
 	ParserVersion         = "mfds-web-list/v1"
 	DefaultUserAgent      = "bottle-note-mfds-crawler/1.0"
 	DefaultMaxBodyBytes   = int64(2 << 20)
-	DefaultRequestTimeout = 20 * time.Second
+	DefaultRequestTimeout = 60 * time.Second
 	MaximumListPageSize   = 50
 )
 

@@ -161,8 +161,18 @@ image tag, revalidate Flyway V13, and approve the schedule and 10,000-row capaci
 using observed inflow and remaining queue metrics. Imperative cluster edits are
 reverted by Argo CD self-heal, and Secret values are never stored in plaintext.
 
-An unresolved importer lookup has no negative marker yet, so repeated lookup cost
-must be monitored. The collector also intentionally reports failure when its
-post-collection importer sync fails, even if the append-only collection transaction
-was already committed; operators must distinguish those two outcomes rather than
-treating a failed Job as lost collection data.
+Both list and importer HTTP requests have a 60-second timeout. List collection
+retains date-task retries and RCNO consistency checks. Importer groups retry transient
+network failures and HTTP 429/500/502/503/504 up to three attempts, with default
+2-second and 5-second waits. Exhausted groups remain unlinked while other groups
+continue; the existing pending query includes them in the next collection run.
+Database errors, cancellation and data validation errors still fail the command.
+
+JSON events on stderr include `collection_fetch_failed`, `collection_finished`,
+`importer_group_attempt_failed`, `importer_group_deferred`, and `importer_sync_finished`.
+Use `job_id`, date/item/page or business name, endpoint, `attempt`, and `code` to
+locate failures. `HTTP_TIMEOUT` identifies request timeouts and
+`IMPORTER_RETRY_EXHAUSTED` identifies deferred groups. A successful collection with
+`failed_groups > 0` still needs importer enrichment. `resolved`, `unresolved` (no
+candidate), and `failed_rcnos` (transport failures) are separate counters.
+Failure history is kept in Pod logs; no new failure table is introduced.

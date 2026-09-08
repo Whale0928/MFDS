@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -32,6 +33,7 @@ type Target struct {
 }
 
 type Options struct {
+	Logger      *slog.Logger
 	Targets     []Target
 	PageSize    int
 	QPS         float64

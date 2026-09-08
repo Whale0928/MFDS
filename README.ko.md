@@ -156,7 +156,18 @@ Flyway V13을 다시 검증해야 합니다. 또한 실측 유입량과 잔여 q
 10,000건 처리 용량을 승인해야 합니다. Argo CD self-heal이 명령형 cluster 변경을
 되돌리며 Secret 값은 평문으로 저장하지 않습니다.
 
-공식 수입사 조회 실패 대상에는 아직 negative marker가 없어 반복 조회 비용을
-관찰해야 합니다. 현재 수집기는 append-only 수집 transaction이 이미 commit됐더라도
-후속 importer sync가 실패하면 의도적으로 실패를 보고합니다. 운영자는 실패한 Job을
-수집 데이터 유실로 간주하지 말고 두 결과를 구분해야 합니다.
+HTTP 요청 제한 시간은 목록·수입사 조회 모두 60초입니다. 목록은 기존 날짜 단위
+재시도와 RCNO 일관성 검증을 유지합니다. 수입사 조회는 일시적 네트워크 오류와
+HTTP 429/500/502/503/504에 대해 업체 그룹 단위로 최대 3회 시도하며, 기본 대기는
+2초와 5초입니다. 재시도를 소진한 업체는 연결을 저장하지 않고 다음 업체를 처리합니다.
+미연결 대상은 기존 pending 조회를 통해 다음 수집 실행에서 다시 조회됩니다.
+DB 오류, 실행 취소, 데이터 검증 오류는 계속 명령 실패로 처리합니다.
+
+stderr의 JSON 로그는 `collection_fetch_failed`, `collection_finished`,
+`importer_group_attempt_failed`, `importer_group_deferred`, `importer_sync_finished`를
+기록합니다. `job_id`, 대상 날짜·품목·페이지 또는 업체명, `attempt`, 오류 `code`를
+사용해 원장을 찾을 수 있습니다. `HTTP_TIMEOUT`은 요청 시간 초과,
+`IMPORTER_RETRY_EXHAUSTED`는 업체 조회 재시도 소진을 뜻합니다.
+수집이 성공해도 `failed_groups > 0`이면 수입사 보강은 미완료입니다.
+`resolved`, `unresolved`(후보 없음), `failed_rcnos`(통신 오류)는 별도로 집계합니다.
+실패 이력은 Pod 로그에 남고 별도 실패 테이블은 만들지 않습니다.

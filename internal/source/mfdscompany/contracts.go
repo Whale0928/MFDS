@@ -19,10 +19,11 @@ func (e *HTTPStatusError) Error() string {
 }
 
 const (
-	ListPath          = "/CFCCC01F02/getList"
-	DetailPath        = "/CFCCC01P01"
-	GalleryListPath   = "/CFCCC01F12/getList"
-	GalleryDetailPath = "/CFCCC01F13/getGalleryDetail"
+	DefaultRequestTimeout = 60 * time.Second
+	ListPath              = "/CFCCC01F02/getList"
+	DetailPath            = "/CFCCC01P01"
+	GalleryListPath       = "/CFCCC01F12/getList"
+	GalleryDetailPath     = "/CFCCC01F13/getGalleryDetail"
 
 	DefaultUserAgent   = "bottle-note-mfds-company-scraper/1.0"
 	DefaultMaxBodySize = 2 << 20

@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"net"
 	"net/url"
 	"strings"
 	"sync"
@@ -14,6 +17,7 @@ import (
 )
 
 type Service struct {
+	logger      *slog.Logger
 	store       Store
 	source      ListSource
 	targets     []Target
@@ -77,7 +81,10 @@ func NewService(store Store, source ListSource, options Options) (*Service, erro
 	if options.QPS > 0 {
 		fetchGap = time.Duration(float64(time.Second) / options.QPS)
 	}
-	return &Service{
+	if options.Logger == nil {
+		options.Logger = slog.New(slog.NewJSONHandler(io.Discard, nil))
+	}
+	return &Service{logger: options.Logger,
 		store: store, source: source, targets: append([]Target(nil), options.Targets...),
 		pageSize: options.PageSize, location: options.Location, webBaseURL: baseURL,
 		now: now, fetchGap: fetchGap, processID: processID, maxAttempts: maxAttempts,
@@ -289,6 +296,12 @@ func (s *Service) failDateTask(
 	}); err != nil && !errors.Is(err, ErrLeaseLost) {
 		return errors.Join(cause, err)
 	}
+	code := kind
+	var networkError net.Error
+	if errors.Is(cause, context.DeadlineExceeded) || (errors.As(cause, &networkError) && networkError.Timeout()) {
+		code = "HTTP_TIMEOUT"
+	}
+	s.logger.Warn("collection_fetch_failed", "code", code, "error_kind", kind, "job_id", task.RunID, "task_id", task.TaskID, "process_date", task.ProcessDate.Format(time.DateOnly), "item", request.ItemName, "page", request.Page, "attempt", task.Attempt, "max_attempts", s.maxAttempts, "http_status", fetch.HTTPStatus, "duration_ms", fetch.Duration.Milliseconds(), "error", SanitizeErrorMessage(cause.Error()))
 	retryable := kind == "NETWORK" || kind == "HTTP" || kind == "CHALLENGE" || kind == "CANCELLED"
 	err := s.store.FailTask(cleanupCtx, FailTaskParams{
 		Task: task, Retryable: retryable, MaxAttempts: s.maxAttempts,

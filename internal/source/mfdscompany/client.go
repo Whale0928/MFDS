@@ -22,12 +22,12 @@ func NewScraper(options Options) (*Scraper, error) {
 		return nil, errors.New("base URL은 userinfo, query, fragment가 없는 절대 HTTP(S) URL이어야 합니다")
 	}
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: DefaultRequestTimeout}
 	if options.HTTPClient != nil {
 		copied := *options.HTTPClient
 		client = &copied
 		if client.Timeout <= 0 {
-			client.Timeout = 20 * time.Second
+			client.Timeout = DefaultRequestTimeout
 		}
 	}
 	client.Jar = nil
@@ -149,7 +149,12 @@ func (s *Scraper) GalleryDetail(ctx context.Context, productCode string) (Galler
 	return detail, nil
 }
 
-func (s *Scraper) fetchHTML(ctx context.Context, path string, query url.Values) ([]byte, SourceMetadata, error) {
+func (s *Scraper) fetchHTML(ctx context.Context, path string, query url.Values) (bodyResult []byte, sourceResult SourceMetadata, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = &RequestError{Endpoint: path, Err: resultErr}
+		}
+	}()
 	target := s.baseURL.ResolveReference(&url.URL{Path: path})
 	target.RawQuery = query.Encode()
 	startedAt := s.now()
