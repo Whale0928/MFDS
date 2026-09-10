@@ -22,10 +22,10 @@ var errNormalizationLeaseLost = errors.New("normalization claim lease lost")
 func (s *Store) SyncDeclarations(ctx context.Context) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO mfds_declarations (rcno, source_item_id)
-			SELECT latest.rcno, latest.id
+			INSERT INTO mfds_declarations (rcno, source_item_id, processed_date)
+			SELECT latest.rcno, latest.id, latest.processed_date
 			FROM (
-				SELECT id, rcno,
+				SELECT id, rcno, processed_date,
 				       ROW_NUMBER() OVER (
 				           PARTITION BY rcno ORDER BY observed_at DESC, id DESC
 				       ) AS rn
@@ -96,7 +96,8 @@ func (s *Store) SyncDeclarations(ctx context.Context) error {
 			        WHEN previous.semantic_sha256 <=> current.semantic_sha256 THEN d.importer_linked_at
 			        ELSE NULL
 			    END,
-			    d.source_item_id = latest.id
+			    d.source_item_id = latest.id,
+			    d.processed_date = current.processed_date
 			WHERE d.source_item_id <> latest.id
 		`)
 		if err != nil {
@@ -317,7 +318,9 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		return err
 	}
 
-	assign := newColumnAssignments(61)
+	assign := newColumnAssignments(62)
+	// 정제 테이블만 조회해도 처리일자를 알 수 있도록 현재 원본의 값을 그대로 옮긴다.
+	assign.set("processed_date", nullableDate(completion.Source.ProcessedDate))
 	assign.set("base_product_name_ko", nullableString(fields.BaseProductNameKO))
 	assign.set("base_product_name_en", nullableString(fields.BaseProductNameEN))
 	assign.set("sku_display_name_ko", nullableString(fields.SKUDisplayNameKO))
@@ -682,6 +685,14 @@ func nullableTime(value *time.Time) any {
 		return nil
 	}
 	return *value
+}
+
+// nullableDate는 원본 처리일자가 없을 때 zero date 대신 NULL을 쓴다.
+func nullableDate(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.Format(time.DateOnly)
 }
 
 func truncateNormalizationError(value string) string {

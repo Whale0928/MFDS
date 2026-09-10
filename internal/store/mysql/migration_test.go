@@ -121,3 +121,42 @@ func TestFlywayV13_폐기큐를RCNO연결근거로교체한다(t *testing.T) {
 		t.Fatal("V13 must be a Flyway migration without Goose directives")
 	}
 }
+
+func TestFlywayV16_정제테이블에처리일자를추가하고기존데이터를동기화한다(t *testing.T) {
+	path := filepath.Join(
+		"..", "..", "..", "git.environment-variables", "storage", "db", "migration",
+		"V16__add_mfds_declaration_processed_date.sql",
+	)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(string(contents))
+
+	for _, required := range []string{
+		"ALTER TABLE MFDS_DECLARATIONS",
+		"ADD COLUMN PROCESSED_DATE DATE NULL",
+		"UPDATE MFDS_DECLARATIONS AS D",
+		"JOIN MFDS_ITEMS AS I ON I.ID = D.SOURCE_ITEM_ID",
+		"SET D.PROCESSED_DATE = I.PROCESSED_DATE",
+		"CREATE OR REPLACE VIEW MFDS_DECLARATION_DETAILS",
+		"SELECT D.*",
+		"AS SOURCE_PROCESSED_DATE",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("V16 must contain %q", required)
+		}
+	}
+	// 원본이 NULL인 행에 임의 날짜를 넣지 않는다.
+	for _, forbidden := range []string{"COALESCE(I.PROCESSED_DATE", "IFNULL(I.PROCESSED_DATE", "CURDATE()", "NOW()"} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("V16 must not substitute a date with %q", forbidden)
+		}
+	}
+	if strings.Contains(sql, "CREATE TABLE") {
+		t.Fatal("V16 must only alter the existing declaration table")
+	}
+	if strings.Contains(sql, "+GOOSE") {
+		t.Fatal("V16 must be a Flyway migration without Goose directives")
+	}
+}

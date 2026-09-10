@@ -685,3 +685,145 @@ func TestNormalizationStore_Preview와Remaining은미동기화원장을읽기전
 		t.Fatal("preview changed immutable ledger source")
 	}
 }
+
+func TestNormalizationStore_Complete_원본처리일자를정제테이블에저장한다(t *testing.T) {
+	store := normalizationStore(t)
+	fixture := newNormalizationFixture(t, store)
+	rcno := fmt.Sprintf("NORM-PD-%d", time.Now().UnixNano())
+	observedAt := time.Date(2026, 9, 4, 9, 0, 0, 0, time.UTC)
+	processedDate := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+	fixture.item(t, rcno, "processed-date", observedAt, processedDate)
+
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var afterSync sql.NullTime
+	if err := store.db.QueryRow(
+		`SELECT processed_date FROM mfds_declarations WHERE rcno = ?`, rcno,
+	).Scan(&afterSync); err != nil {
+		t.Fatal(err)
+	}
+	if !afterSync.Valid || afterSync.Time.Format(time.DateOnly) != processedDate.Format(time.DateOnly) {
+		t.Fatalf("sync 직후 processed_date = %v, want %s", afterSync, processedDate.Format(time.DateOnly))
+	}
+
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "processed-date-worker"))
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("claim=%+v error=%v", sources, err)
+	}
+	if sources[0].ProcessedDate.Format(time.DateOnly) != processedDate.Format(time.DateOnly) {
+		t.Fatalf("claim source ProcessedDate = %v", sources[0].ProcessedDate)
+	}
+	if err := store.Complete(context.Background(), normalization.Completion{
+		Source:               sources[0],
+		Result:               normalization.Result{Status: normalization.StatusNormalized},
+		NormalizationVersion: "normalization-test",
+		NormalizedAt:         observedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stored sql.NullTime
+	var viewSource sql.NullTime
+	if err := store.db.QueryRow(`
+		SELECT processed_date, source_processed_date
+		FROM mfds_declaration_details WHERE rcno = ?
+	`, rcno).Scan(&stored, &viewSource); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Valid || stored.Time.Format(time.DateOnly) != processedDate.Format(time.DateOnly) {
+		t.Fatalf("complete 이후 processed_date = %v, want %s", stored, processedDate.Format(time.DateOnly))
+	}
+	if !viewSource.Valid || viewSource.Time.Format(time.DateOnly) != stored.Time.Format(time.DateOnly) {
+		t.Fatalf("뷰의 source_processed_date = %v, 정제 값 = %v", viewSource, stored)
+	}
+}
+
+func TestNormalizationStore_Complete_원본처리일자가없으면NULL을유지한다(t *testing.T) {
+	store := normalizationStore(t)
+	fixture := newNormalizationFixture(t, store)
+	rcno := fmt.Sprintf("NORM-PDN-%d", time.Now().UnixNano())
+	observedAt := time.Date(2026, 9, 4, 9, 0, 0, 0, time.UTC)
+	itemID := fixture.item(t, rcno, "processed-date-null", observedAt, observedAt)
+	if _, err := store.db.Exec(`UPDATE mfds_items SET processed_date = NULL WHERE id = ?`, itemID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := store.Claim(context.Background(), normalizationRequest(rcno, "processed-date-null-worker"))
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("claim=%+v error=%v", sources, err)
+	}
+	if !sources[0].ProcessedDate.IsZero() {
+		t.Fatalf("claim source ProcessedDate = %v, want zero", sources[0].ProcessedDate)
+	}
+	if err := store.Complete(context.Background(), normalization.Completion{
+		Source:               sources[0],
+		Result:               normalization.Result{Status: normalization.StatusNormalized},
+		NormalizationVersion: "normalization-test",
+		NormalizedAt:         observedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stored sql.NullTime
+	if err := store.db.QueryRow(
+		`SELECT processed_date FROM mfds_declarations WHERE rcno = ?`, rcno,
+	).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Valid {
+		t.Fatalf("processed_date = %v, want NULL", stored.Time)
+	}
+}
+
+func TestNormalizationStore_Sync_원본연결이바뀌면처리일자도따라간다(t *testing.T) {
+	store := normalizationStore(t)
+	fixture := newNormalizationFixture(t, store)
+	rcno := fmt.Sprintf("NORM-PDS-%d", time.Now().UnixNano())
+	base := time.Date(2026, 9, 4, 9, 0, 0, 0, time.UTC)
+	firstDate := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	fixture.item(t, rcno, "same-semantics", base, firstDate)
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// 의미 해시가 같으면 재정제가 일어나지 않으므로 동기화가 직접 날짜를 옮겨야 한다.
+	laterDate := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	laterID := fixture.item(t, rcno, "same-semantics", base.Add(time.Second), laterDate)
+	if err := store.SyncDeclarations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	var sourceID int64
+	var status string
+	var stored sql.NullTime
+	if err := store.db.QueryRow(`
+		SELECT source_item_id, normalization_status, processed_date
+		FROM mfds_declarations WHERE rcno = ?
+	`, rcno).Scan(&sourceID, &status, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if sourceID != laterID {
+		t.Fatalf("source_item_id = %d, want %d", sourceID, laterID)
+	}
+	if status != string(normalization.StatusPending) {
+		t.Fatalf("normalization_status = %s, want PENDING", status)
+	}
+	if !stored.Valid || stored.Time.Format(time.DateOnly) != laterDate.Format(time.DateOnly) {
+		t.Fatalf("processed_date = %v, want %s", stored, laterDate.Format(time.DateOnly))
+	}
+
+	var mismatch int
+	if err := store.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM mfds_declarations AS d
+		JOIN mfds_items AS i ON i.id = d.source_item_id
+		WHERE NOT (d.processed_date <=> i.processed_date)
+	`).Scan(&mismatch); err != nil {
+		t.Fatal(err)
+	}
+	if mismatch != 0 {
+		t.Fatalf("원본과 정제 테이블의 날짜 불일치 = %d건", mismatch)
+	}
+}
