@@ -209,6 +209,43 @@ func TestScraper_SearchGallery_결과수가맞지않으면실패한다(t *testin
 	}
 }
 
+func TestScraper_GalleryDetail_그룹대장번호가없으면수입자업소코드를쓴다(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		_, _ = writer.Write([]byte(galleryDetailWithoutLedgerFixture))
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	scraper, err := NewScraper(Options{BaseURL: baseURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := scraper.GalleryDetail(context.Background(), "202600062573")
+	if err != nil {
+		t.Fatalf("GalleryDetail() error = %v", err)
+	}
+	if detail.RCNO != "202600621822" || detail.InternalBusinessCode != "2026001000272562" || detail.BusinessName != "명천" {
+		t.Fatalf("gallery detail = %+v", detail)
+	}
+}
+
+func TestScraper_GalleryDetail_업소코드가모두없으면실패한다(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		_, _ = writer.Write([]byte(galleryDetailWithoutBusinessCodeFixture))
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	scraper, err := NewScraper(Options{BaseURL: baseURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scraper.GalleryDetail(context.Background(), "202600062573"); err == nil ||
+		!strings.Contains(err.Error(), "내부업소코드") {
+		t.Fatalf("GalleryDetail() error = %v", err)
+	}
+}
+
 const listFixture = `<!doctype html>
 <html lang="ko"><body>
 <ul><li>
@@ -254,5 +291,26 @@ var param = {
   "rcno":"202500622605",
   "grpBsnLcnsLedgNo":"2015001005371115",
   "prductCd":"201940000755"
+};
+</script></body></html>`
+
+// 신규 등록 업소는 grpBsnLcnsLedgNo가 비어 있고 impOwrLcsno에만 업소코드가 들어온다.
+const galleryDetailWithoutLedgerFixture = `<!doctype html><html lang="ko"><body><script>
+var param = {
+  "bsshNm":"명천",
+  "rcno":"202600621822",
+  "grpBsnLcnsLedgNo":null,
+  "impOwrLcsno":"2026001000272562",
+  "prductCd":"202600062573"
+};
+</script></body></html>`
+
+const galleryDetailWithoutBusinessCodeFixture = `<!doctype html><html lang="ko"><body><script>
+var param = {
+  "bsshNm":"명천",
+  "rcno":"202600621822",
+  "grpBsnLcnsLedgNo":null,
+  "impOwrLcsno":null,
+  "prductCd":"202600062573"
 };
 </script></body></html>`

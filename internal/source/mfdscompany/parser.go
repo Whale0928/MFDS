@@ -191,23 +191,28 @@ func parseGalleryDetail(body []byte, productCode string) (GalleryDetail, error) 
 	if len(match) != 2 {
 		return GalleryDetail{}, fmt.Errorf("갤러리 상세 param 데이터를 찾을 수 없습니다")
 	}
+	// grpBsnLcnsLedgNo는 신규 등록 업소에서 비어 오므로 항상 채워지는 impOwrLcsno를 먼저 본다.
 	var payload struct {
-		RCNO                 string `json:"rcno"`
-		InternalBusinessCode string `json:"grpBsnLcnsLedgNo"`
-		BusinessName         string `json:"bsshNm"`
+		RCNO          string `json:"rcno"`
+		ImporterCode  string `json:"impOwrLcsno"`
+		GroupLedgerNo string `json:"grpBsnLcnsLedgNo"`
+		BusinessName  string `json:"bsshNm"`
 	}
 	if err := json.Unmarshal(match[1], &payload); err != nil {
 		return GalleryDetail{}, fmt.Errorf("갤러리 상세 param JSON 해석: %w", err)
 	}
 	payload.RCNO = strings.TrimSpace(payload.RCNO)
-	payload.InternalBusinessCode = strings.TrimSpace(payload.InternalBusinessCode)
 	payload.BusinessName = strings.TrimSpace(payload.BusinessName)
-	if payload.RCNO == "" || payload.InternalBusinessCode == "" || payload.BusinessName == "" {
+	internalBusinessCode := strings.TrimSpace(payload.ImporterCode)
+	if internalBusinessCode == "" {
+		internalBusinessCode = strings.TrimSpace(payload.GroupLedgerNo)
+	}
+	if payload.RCNO == "" || internalBusinessCode == "" || payload.BusinessName == "" {
 		return GalleryDetail{}, fmt.Errorf("갤러리 상세에 RCNO, 내부업소코드 또는 업소명이 없습니다")
 	}
 	return GalleryDetail{
 		ProductCode: productCode, RCNO: payload.RCNO,
-		InternalBusinessCode: payload.InternalBusinessCode, BusinessName: payload.BusinessName,
+		InternalBusinessCode: internalBusinessCode, BusinessName: payload.BusinessName,
 	}, nil
 }
 
