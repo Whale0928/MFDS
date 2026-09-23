@@ -23,9 +23,6 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 	logger := slog.New(slog.NewJSONHandler(errOut, nil))
 	root, err := cmd.NewRootCommand(cmd.Dependencies{
 		Loader: config.NewLoader(),
-		OpenDatabase: func(cfg config.DatabaseConfig) (cmd.Database, error) {
-			return storemysql.Open(cfg)
-		},
 		RunWebListJob: func(
 			ctx context.Context,
 			cfg config.Config,
@@ -90,7 +87,6 @@ func Run(ctx context.Context, out, errOut io.Writer) error {
 			return result, nil
 		},
 		RunNormalization: runNormalization,
-		RunMatching:      runMatching,
 		Out:              out,
 		ErrOut:           errOut,
 	})

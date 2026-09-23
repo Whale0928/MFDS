@@ -10,7 +10,6 @@ import (
 	matchingdomain "github.com/bottle-note/mfds-crawler/internal/matching"
 	parser "github.com/bottle-note/mfds-crawler/internal/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/identity"
-	matchingusecase "github.com/bottle-note/mfds-crawler/internal/usecase/matching"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 )
 
@@ -27,8 +26,10 @@ func readSelectionState(t *testing.T, store *Store, rcno string) selectionState 
 	if err := store.db.QueryRow(`
 		SELECT alcohol_match_decision, distillery_match_source, region_match_source,
 		       selected_alcohol_id, selected_distillery_id, selected_region_id,
-		       inherited_from_declaration_id, alcohol_candidate_1_id
-		FROM mfds_declarations WHERE rcno = ?
+		       inherited_from_declaration_id,
+		       (SELECT c.target_id FROM mfds_matching_candidates AS c
+		        WHERE c.declaration_id = d.id AND c.run_id = d.matching_run_id AND c.target_type = 'ALCOHOL' AND c.rank_no = 1)
+		FROM mfds_declarations AS d WHERE rcno = ?
 	`, rcno).Scan(
 		&state.decision, &state.distillerySource, &state.regionSource,
 		&state.alcoholID, &state.distilleryID, &state.regionID, &state.inheritedFrom, &state.candidateOne,
@@ -78,15 +79,10 @@ func completeWithMatch(t *testing.T, store *Store, rcno, owner string, runID int
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claim = %+v, error = %v", claimed, err)
 	}
-	var candidates []normalization.ReferenceCandidate
-	if match.AlcoholDecision.SelectedID > 0 {
-		candidates = []normalization.ReferenceCandidate{{ID: match.AlcoholDecision.SelectedID, Score: 12}}
-	}
 	if err := store.Complete(context.Background(), normalization.Completion{
 		Source: claimed[0],
 		Result: normalization.Result{Status: normalization.StatusNormalized, Fields: normalization.Fields{
-			AlcoholCandidates: candidates,
-			MatchingVersion:   "matching-test", MatchingRunID: runID, MatchingResult: match,
+			MatchingVersion: "matching-test", MatchingRunID: runID, MatchingResult: match,
 		}},
 		NormalizationVersion: "normalization-test", NormalizedAt: now,
 	}); err != nil {
@@ -106,7 +102,7 @@ func countAutoSelections(t *testing.T, store *Store, rcno string) int {
 	return count
 }
 
-func TestSelectionPreservation_관리자결정은STALE재정제_강제재정제_match후에도유지된다(t *testing.T) {
+func TestSelectionPreservation_관리자결정은STALE재정제_강제재정제후에도유지된다(t *testing.T) {
 	// Given
 	store := normalizationStore(t)
 	fixture := newNormalizationFixture(t, store)
@@ -152,28 +148,17 @@ func TestSelectionPreservation_관리자결정은STALE재정제_강제재정제_
 			}
 			completeWithMatch(t, store, rcno, "preserve-force", runID, autoSelectedResult(77, 78, 79), base.Add(2*time.Second))
 			afterForce := readSelectionState(t, store, rcno)
-			// When: match 백필
-			sources, err := store.ListMatchingSources(ctx, matchingusecase.Query{RCNO: rcno, Force: true})
-			if err != nil || len(sources) != 1 {
-				t.Fatalf("sources = %+v, error = %v", sources, err)
-			}
-			if err := store.SaveMatchingResult(ctx, matchingusecase.Completion{
-				RunID: runID, Source: sources[0], Result: autoSelectedResult(77, 78, 79), Version: "matching-next", MatchedAt: base.Add(3 * time.Second),
-			}); err != nil {
-				t.Fatal(err)
-			}
-			afterMatch := readSelectionState(t, store, rcno)
 
 			// Then
-			for name, got := range map[string]selectionState{"stale": afterStale, "force": afterForce, "match": afterMatch} {
+			for name, got := range map[string]selectionState{"stale": afterStale, "force": afterForce} {
 				if got.decision != want.decision || got.distillerySource != want.distillerySource || got.regionSource != want.regionSource ||
 					got.alcoholID != want.alcoholID || got.distilleryID != want.distilleryID || got.regionID != want.regionID ||
 					got.inheritedFrom != want.inheritedFrom {
 					t.Fatalf("%s changed preserved selection: want=%+v got=%+v", name, want, got)
 				}
 			}
-			if !afterMatch.candidateOne.Valid || afterMatch.candidateOne.Int64 != 77 {
-				t.Fatalf("candidate slot was not refreshed: %+v", afterMatch.candidateOne)
+			if !afterForce.candidateOne.Valid || afterForce.candidateOne.Int64 != 77 {
+				t.Fatalf("latest run candidate was not recorded: %+v", afterForce.candidateOne)
 			}
 			if count := countAutoSelections(t, store, rcno); count != 0 {
 				t.Fatalf("AUTO selection history rows = %d, want 0", count)

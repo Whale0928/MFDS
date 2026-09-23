@@ -21,7 +21,6 @@ backups/
 reports/
 tmp/
 
-tools/
 docs/
 
 *.log

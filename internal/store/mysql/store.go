@@ -1,7 +1,6 @@
 package mysql
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -25,13 +24,6 @@ func Open(cfg config.DatabaseConfig) (*Store, error) {
 	db.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 	db.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
 	return &Store{db: db}, nil
-}
-
-func (s *Store) Ping(ctx context.Context) error {
-	if err := s.db.PingContext(ctx); err != nil {
-		return fmt.Errorf("MySQL 연결 실패: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) Close() error {

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"time"
@@ -11,27 +10,18 @@ import (
 	"github.com/bottle-note/mfds-crawler/internal/config"
 )
 
-type Database interface {
-	Ping(context.Context) error
-	Close() error
-}
-
 type Dependencies struct {
 	Loader           *config.Loader
-	OpenDatabase     func(config.DatabaseConfig) (Database, error)
 	RunWebListJob    RunWebListJobFunc
 	RunNormalization RunNormalizationFunc
-	RunMatching      RunMatchingFunc
 	Out              io.Writer
 	ErrOut           io.Writer
 }
 
 func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 	if deps.Loader == nil ||
-		deps.OpenDatabase == nil ||
 		deps.RunWebListJob == nil ||
 		deps.RunNormalization == nil ||
-		deps.RunMatching == nil ||
 		deps.Out == nil ||
 		deps.ErrOut == nil {
 		return nil, fmt.Errorf("CLI 의존성이 모두 필요합니다")
@@ -62,40 +52,8 @@ func NewRootCommand(deps Dependencies) (*cobra.Command, error) {
 
 	getConfig := func() config.Config { return cfg }
 	root.AddCommand(
-		newHealthCommand(getConfig, deps.OpenDatabase, deps.Out),
+		newCollectRecentCommand(getConfig, deps.RunWebListJob, deps.Out, time.Now),
+		newNormalizeCommand(getConfig, deps.RunNormalization, deps.Out),
 	)
-	if err := addCollectorContract(root, getConfig, deps.RunWebListJob); err != nil {
-		return nil, err
-	}
-	root.AddCommand(newNormalizeCommand(getConfig, deps.RunNormalization, deps.Out))
-	root.AddCommand(newMatchCommand(getConfig, deps.RunMatching, deps.Out))
 	return root, nil
-}
-
-func newHealthCommand(
-	getConfig func() config.Config,
-	openDatabase func(config.DatabaseConfig) (Database, error),
-	out io.Writer,
-) *cobra.Command {
-	return &cobra.Command{
-		Use:   "health",
-		Short: "설정과 MySQL 연결을 확인합니다",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg := getConfig()
-			db, err := openDatabase(cfg.Database)
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-
-			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
-			defer cancel()
-			if err := db.Ping(ctx); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "health 정상: config=ok mysql=ok targets=%d\n", len(cfg.Targets))
-			return nil
-		},
-	}
 }

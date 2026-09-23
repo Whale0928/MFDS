@@ -37,12 +37,6 @@ mfds_jobs → mfds_tasks → mfds_fetches → mfds_items → mfds_declarations
 task setup
 task compose:up
 task migrate
-task health
-
-task run -- collect \
-  --from YYYY-MM-DD \
-  --to YYYY-MM-DD \
-  --workers 2
 
 task run -- collect-recent
 
@@ -51,10 +45,10 @@ task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
 task run -- normalize --force --limit 20000
-
-task run -- match --all --dry-run
-task run -- match --all
 ```
+
+CLI 명령은 운영·개발 `CronJob`이 실행하는 `collect-recent`와 `normalize` 두 개뿐입니다.
+인자 없이 실행하면 도움말을 출력합니다.
 
 `normalize`는 기본 100건을 처리합니다. `--rcno`는 상태와 관계없이 한 건을
 재정제하고, `--dry-run`은 원장·정제 행·lease·시각을 변경하지 않습니다.
@@ -71,11 +65,10 @@ task run -- match --all
 `normalize --rcno RCNO`로 강제 재정제합니다.
 
 MFDS는 같은 BottleNote 데이터베이스의 `alcohols`, `distilleries`, `regions`
-원본 테이블을 직접 조회합니다. 1차 정제는 증류소·리전 후보를 함께 저장하고,
-`match`는 이미 정제된 행을 백필합니다. 후보 슬롯과 매칭 실행 기록은 두 경로 모두
-최신 매처 결과로 갱신합니다. `alcohol_match_decision`이 관리자 확정(`CANDIDATE`,
-`MANUAL`) 또는 상속(`INHERITED`)인 행은 재수집, `STALE`, `--rcno`, `--force`,
-`match`를 거쳐도 선택한 알코올·증류소·리전 ID, 결정, 출처,
+원본 테이블을 직접 조회합니다. `normalize`는 정제와 함께 알코올·증류소·리전 매칭을
+계산하고, 매칭 실행 기록과 후보 이력을 최신 매처 결과로 갱신합니다.
+`alcohol_match_decision`이 관리자 확정(`CANDIDATE`, `MANUAL`) 또는 상속(`INHERITED`)인
+행은 재수집, `STALE`, `--rcno`, `--force`를 거쳐도 선택한 알코올·증류소·리전 ID, 결정, 출처,
 `inherited_from_declaration_id`를 유지하고 `AUTO` 선택 이력을 남기지 않습니다. 그 밖의
 행은 기존 선택 ID를 보존하며, 컬럼에 자동 선택값이 실제로 들어간 경우에만 `AUTO`
 이력을 기록합니다.
@@ -149,7 +142,6 @@ internal/usecase/importerresolution/ 공식 페이지 기반 RCNO 수입사 해�
 internal/normalization/      순수 정제 규칙과 파서
 internal/matching/           불변 alcohol·증류소·리전 matcher
 internal/usecase/normalization/ 정제 batch와 상태 전이
-internal/usecase/matching/   매칭 dry-run과 백필 조정
 internal/usecase/identity/   빠진 제품 동일성 키 채움
 internal/usecase/inheritance/ 관리자 확정 매칭 상속 계획과 적용
 internal/store/mysql/        원장과 정제 결과 저장

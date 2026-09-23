@@ -51,7 +51,7 @@ func TestParserAdapter_같은키의관리자매칭이있으면매처없이바로
 	fields := result.Fields
 	if fields.InheritedFromDeclarationID != 1 || fields.MatchingResult.AlcoholDecision.Status != matchdomain.DecisionInherited ||
 		fields.MatchingResult.AlcoholDecision.SelectedID != 5582 || fields.MatchingResult.DistilleryDecision.SelectedID != 7 ||
-		fields.MatchingResult.RegionDecision.SelectedID != 8 || len(fields.AlcoholCandidates) != 0 {
+		fields.MatchingResult.RegionDecision.SelectedID != 8 || len(fields.MatchingResult.Alcohols) != 0 {
 		t.Fatalf("fields = %+v", fields.MatchingResult)
 	}
 }

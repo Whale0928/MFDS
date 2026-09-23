@@ -37,12 +37,6 @@ match. Repeated observations remain in the ledger for later normalization.
 task setup
 task compose:up
 task migrate
-task health
-
-task run -- collect \
-  --from YYYY-MM-DD \
-  --to YYYY-MM-DD \
-  --workers 2
 
 task run -- collect-recent
 
@@ -51,10 +45,10 @@ task run -- normalize --limit 100
 task run -- normalize --rcno RCNO
 task run -- normalize --dry-run
 task run -- normalize --force --limit 20000
-
-task run -- match --all --dry-run
-task run -- match --all
 ```
+
+The CLI has only the two commands the production and development `CronJob`s run:
+`collect-recent` and `normalize`. Running it without arguments prints help.
 
 `normalize` processes 100 rows by default. `--rcno` force-normalizes one row
 regardless of its current state, while `--dry-run` changes no ledger row,
@@ -72,13 +66,13 @@ After fixing a system error, recover an RCNO that exhausted its retry limit with
 `normalize --rcno RCNO`.
 
 MFDS reads the canonical `alcohols`, `distilleries`, and `regions` tables from
-the same BottleNote database. Primary normalization writes ranked distillery
-and region candidates, while `match` backfills already-normalized mfds_declarations.
-Candidate slots and matching run records always follow the latest matcher. A row whose
+the same BottleNote database. `normalize` computes alcohol, distillery, and region
+matches while normalizing, and matching run records and candidate history always follow
+the latest matcher. A row whose
 `alcohol_match_decision` is `CANDIDATE` or `MANUAL` (administrator confirmation) or
 `INHERITED` keeps its selected alcohol, distillery, and region IDs, decision, sources,
-and `inherited_from_declaration_id` through re-collection, `STALE`, `--rcno`, `--force`,
-and `match`, and gets no `AUTO` selection history row. Other rows keep an existing
+and `inherited_from_declaration_id` through re-collection, `STALE`, `--rcno`, and
+`--force`, and gets no `AUTO` selection history row. Other rows keep an existing
 selected ID and record `AUTO` history only when the column holds the automatic choice.
 
 Normalization stores `product_identity_key_sha256`: both language search keys, ABV,
@@ -156,7 +150,6 @@ internal/usecase/importerresolution/ official-page RCNO importer resolution
 internal/normalization/      pure normalization rules and parsers
 internal/matching/           immutable alcohol, distillery, and region matcher
 internal/usecase/normalization/ normalization batch and state transitions
-internal/usecase/matching/   matching dry-run and backfill orchestration
 internal/usecase/identity/   fills missing product identity keys
 internal/usecase/inheritance/ administrator match inheritance planning and writes
 internal/store/mysql/        ledger and normalization persistence

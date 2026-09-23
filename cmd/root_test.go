@@ -11,23 +11,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bottle-note/mfds-crawler/internal/config"
-	matchingusecase "github.com/bottle-note/mfds-crawler/internal/usecase/matching"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/weblist"
 )
-
-type fakeDatabase struct {
-	pinged bool
-}
-
-func (f *fakeDatabase) Ping(context.Context) error {
-	f.pinged = true
-	return nil
-}
-
-func (f *fakeDatabase) Close() error {
-	return nil
-}
 
 func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 	root, output := newTestRoot(t)
@@ -40,12 +26,12 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 		!strings.Contains(output.String(), "Available Commands:") {
 		t.Fatalf("output = %q", output.String())
 	}
-	for _, command := range []string{"collect", "collect-recent", "health", "match", "normalize"} {
-		if !strings.Contains(output.String(), command) {
+	for _, command := range []string{"collect-recent", "normalize"} {
+		if !strings.Contains(output.String(), "\n  "+command+" ") {
 			t.Fatalf("command %q missing from output = %q", command, output.String())
 		}
 	}
-	for _, removed := range []string{"all", "api", "completion", "config", "db", "run", "sync-company-registry", "verify", "web"} {
+	for _, removed := range []string{"all", "api", "collect", "completion", "config", "db", "health", "match", "reference-sync", "run", "sync-company-registry", "verify", "web"} {
 		if strings.Contains(output.String(), "\n  "+removed+" ") {
 			t.Fatalf("removed command %q remains in output = %q", removed, output.String())
 		}
@@ -57,51 +43,14 @@ func TestRootCommand_인자가없으면도움말을출력한다(t *testing.T) {
 	}
 }
 
-func TestRootCommand_Health_설정과DB연결결과를출력한다(t *testing.T) {
-	fake := &fakeDatabase{}
-	root, output := newTestRootWithDatabase(t, fake)
-	root.SetArgs([]string{"health"})
-
-	if err := root.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if !fake.pinged {
-		t.Fatal("Ping() was not called")
-	}
-	if !strings.Contains(output.String(), "health 정상: config=ok mysql=ok targets=4") {
-		t.Fatalf("output = %q", output.String())
-	}
-}
-
 func newTestRoot(t *testing.T) (*cobra.Command, *bytes.Buffer) {
-	t.Helper()
-	return newTestRootWithRunner(t, &fakeDatabase{}, successfulWebListJob)
-}
-
-func newTestRootWithDatabase(
-	t *testing.T,
-	database Database,
-) (*cobra.Command, *bytes.Buffer) {
-	t.Helper()
-	return newTestRootWithRunner(t, database, successfulWebListJob)
-}
-
-func newTestRootWithRunner(
-	t *testing.T,
-	database Database,
-	runWebListJob RunWebListJobFunc,
-) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
 	configFile, _ := writeCLIConfig(t)
 	output := &bytes.Buffer{}
 	root, err := NewRootCommand(Dependencies{
-		Loader: config.NewLoader(),
-		OpenDatabase: func(config.DatabaseConfig) (Database, error) {
-			return database, nil
-		},
-		RunWebListJob:    runWebListJob,
+		Loader:           config.NewLoader(),
+		RunWebListJob:    successfulWebListJob,
 		RunNormalization: successfulNormalization,
-		RunMatching:      successfulMatching,
 		Out:              output,
 		ErrOut:           output,
 	})
@@ -110,14 +59,6 @@ func newTestRootWithRunner(
 	}
 	t.Chdir(filepath.Dir(filepath.Dir(configFile)))
 	return root, output
-}
-
-func successfulMatching(
-	context.Context,
-	config.Config,
-	matchingusecase.Command,
-) (matchingusecase.Summary, error) {
-	return matchingusecase.Summary{}, nil
 }
 
 func successfulNormalization(

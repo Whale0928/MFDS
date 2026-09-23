@@ -391,9 +391,6 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	assign.set("cask_candidate", nullableString(fields.CaskCandidate))
 	assign.set("distillery_name_ko_candidate", nullableString(fields.DistilleryNameKOCandidate))
 	assign.set("distillery_name_en_candidate", nullableString(fields.DistilleryNameENCandidate))
-	setStoredCandidates(assign, "alcohol", storedNormalizationCandidates(fields.AlcoholCandidates))
-	setStoredCandidates(assign, "distillery", storedNormalizationCandidates(fields.DistilleryCandidates))
-	setStoredCandidates(assign, "region", storedNormalizationCandidates(fields.RegionCandidates))
 	assign.set("matching_version", nullableString(fields.MatchingVersion))
 	assign.set("matching_run_id", nullablePositiveID(fields.MatchingRunID))
 	// 같은 키의 관리자 매칭을 그대로 쓴 결과는 자동 매칭보다 우선하므로 기존 자동 선택도 덮어쓴다.
@@ -553,14 +550,6 @@ func resolveImporterLink(ctx context.Context, tx *sql.Tx, rcno, sourceImporterNa
 		return importerID, "PAGE_NAME", nil
 	}
 	return nil, "", nil
-}
-
-func storedNormalizationCandidates(candidates []normalization.ReferenceCandidate) []storedCandidate {
-	stored := make([]storedCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		stored = append(stored, storedCandidate{id: candidate.ID, score: candidate.Score})
-	}
-	return stored
 }
 
 // Fail releases a fenced claim for a later retry while keeping prior derived
