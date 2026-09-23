@@ -19,8 +19,9 @@ func Normalize(input Input) Result {
 	result.SKUDisplayNameKO = displayName(input.ProductNameKO, volume, result.ABVPercent)
 	result.SKUDisplayNameEN = displayName(input.ProductNameEN, volume, result.ABVPercent)
 	confirmedVariant := confirmedNameVariant(result)
-	result.BaseProductNameKO = baseName(result.SKUDisplayNameKO, result.ABVPercent, confirmedVariant)
-	result.BaseProductNameEN = baseName(result.SKUDisplayNameEN, result.ABVPercent, confirmedVariant)
+	anniversaries := anniversaryNumbers(input.ProductNameKO, input.ProductNameEN)
+	result.BaseProductNameKO = baseName(result.SKUDisplayNameKO, result.ABVPercent, confirmedVariant, anniversaries)
+	result.BaseProductNameEN = baseName(result.SKUDisplayNameEN, result.ABVPercent, confirmedVariant, anniversaries)
 	result.NameSearchKeyKO = searchKey(result.BaseProductNameKO)
 	result.NameSearchKeyEN = searchKey(result.BaseProductNameEN)
 	if strings.TrimSpace(input.ProductNameEN) != "" {
@@ -35,6 +36,7 @@ func Normalize(input Input) Result {
 	} else if hasSourceName(input) {
 		result.SKUCandidateKeySHA256 = candidateHash(result)
 	}
+	result.ProductIdentityKeySHA256 = ProductIdentityKey(IdentityFromResult(result))
 	hasName := strings.TrimSpace(input.ProductNameKO) != "" || strings.TrimSpace(input.ProductNameEN) != ""
 	if state.reviewRequired {
 		result.Status = StatusReviewRequired

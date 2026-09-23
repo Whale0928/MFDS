@@ -191,6 +191,9 @@ volume_ml          = 700
 - 도수가 다른 후보는 이름과 용량이 같아도 자동 병합하지 않는다.
 - 자동 범위를 벗어난 값은 오류로 버리지 않고 검토 대상으로 보낸다.
 - 성분 함량은 `ingredient_percent_raw`, `ingredient_percent`로 분리하고 `abv_percent`에 넣지 않는다.
+- 성분 판정은 함량을 서술하는 문맥으로만 한정한다. 퍼센트 바로 앞에 성분 명사(향·향료·추출물·증류액·농축액·원액·과즙·함량·고형분·인삼·송이 등)가 붙어 있거나, 바로 뒤에 `함유`가 오거나, `100% 호밀`·`100% RYE`·`100% ISLAY`처럼 원재료 전체를 뜻하는 100%일 때만 성분이다.
+- 괄호 안 단독 퍼센트 `(54.8%)`, 문자열 끝 퍼센트, `ALC`·`주도`·`%VOL` 앵커는 주변에 `MALT`, `몰트`, `GRAIN`, `인삼` 같은 품목 단어가 있어도 `abv_percent`로 본다.
+- 성분으로 판정한 단일 값이 20%를 넘으면 병 도수 오분류 가능성이 있으므로 `INGREDIENT_PERCENT_ABOVE_AUTOMATIC_RANGE`로 검토 대상에 보낸다. 값은 `ingredient_percent`에 그대로 둔다. 퍼센트 바로 뒤 `함유`나 `100% 호밀`처럼 함량을 직접 서술한 표기는 병 도수로 읽힐 여지가 없으므로 이 사유를 붙이지 않는다.
 - 성분 퍼센트가 여러 개면 모든 퍼센트 원문만 `ingredient_percent_raw`에 보존하고 숫자 컬럼은 비우며 검토 대상으로 보낸다.
 
 ```text
@@ -208,8 +211,8 @@ volume_ml          = 700
 | 영문명 | `ALC.40%`, `WHITE SPIRIT 52%` | 12 | 명시 도수 문맥일 때 자동 추출 |
 | 한글명 | `(43%)` | 397 | 자동 추출 |
 | 한글명 | `주도38%` | 44 | 자동 추출 |
-| 한글명 | `56도` | 43 | 자동 추출 |
-| 한글명 | 이름 끝 `52%` | 38 | 성분 단어가 없을 때 자동 추출 |
+| 한글명 | `56도`, `56도 프리미엄금문고량주`, `북경이과두주(56도)` | 43 + 44 | `도` 뒤가 공백·괄호·끝이면 위치와 관계없이 자동 추출 |
+| 한글명 | 이름 끝 `52%` | 38 | 함량 서술 문맥이 아니면 자동 추출 |
 | 한·영 이름 | `주도NN%`, `(NN%, 용량)`, `NN% 용량`, 이름 앞 `NN%VOL` | 관측 문맥 | 실제 도수 앵커가 있을 때 자동 추출 |
 
 현재 자동 추출 패턴에서 관찰된 범위는 대체로 4~69%다. `0 < 값 <= 70`은 자동 처리 가드로 사용할 수 있지만, 범위 밖의 값은 무효가 아니라 `review_required`다.
@@ -223,6 +226,7 @@ volume_ml          = 700
 | 한글명 중간 단일 `%` | 73 | 검토 |
 | 한글명에 `%`가 여러 개 | 26 | 성분 가능성이 높아 검토 |
 | 향·과즙·농축·원액·함유 문맥 | 12 | 도수로 추출하지 않음 |
+| 몰트·그레인·인삼 옆의 `(54.8%)`, 끝 `46%` | 77 (2026.09 운영) | v3는 성분으로 오분류했으나 v4부터 병 도수로 추출 |
 | 한글 `100%` | 3 | 마케팅·원재료 표기 |
 | 숫자 `100 PROOF` | 9 | `proof`로 보존하고 자동 환산하지 않음 |
 | `BARREL STRENGTH`, `OVERPROOF` | 관측 문맥 | 제품 설명이며 숫자 도수 아님 |
@@ -234,7 +238,9 @@ volume_ml          = 700
 영문명: LOW LIQUOR 42%
 ```
 
-한글명의 첫 `%`를 사용하면 도수가 `0.45%`로 오수집된다. 인삼·향료·과즙·농축액·원액·추출물·주스·시럽·곡물 등 성분 문맥을 먼저 분리하고, `주도`, 용량 결합, `%VOL` 같은 실제 도수 앵커를 우선한다.
+한글명의 첫 `%`를 사용하면 도수가 `0.45%`로 오수집된다. `인삼0.45%`, `송이0.1%`처럼 성분 명사가 퍼센트에 붙은 함량 문맥을 먼저 분리하고, `주도`, 용량 결합, `%VOL` 같은 실제 도수 앵커를 우선한다.
+
+v3는 퍼센트 앞뒤 16자 안에 몰트·그레인·과일·인삼 같은 단어가 있으면 성분으로 판정했다. 그 결과 2026.09 운영 원장에서 `카발란 솔리스트 비노 바리끄 싱글몰트 위스키 (54.8%)`, `TEELING SINGLE GRAIN (46%)`, `인삼송이주(33%)` 등 77건이 `abv_percent` 없이 NORMALIZED로 저장되었다. v4는 품목 단어를 성분 근거로 쓰지 않는다. 성분이 맞는 기존 사례(`수수43%함유`, `100% 호밀`, `천연오렌지향 10.99% 함유`, `천연크랜베리향 0.1%`)는 그대로 성분이다. 이 중 20%를 넘는 두 건은 함량 서술이므로 검토로 올리지 않는다.
 
 `CASK STRENGTH`, `BARREL STRENGTH`와 관측 오타 `STRENGHT`, `STRENGH`, `STRENCH`는 각각 canonical `STRENGTH`로 저장한다. `CS`는 반대 언어에 `CASK STRENGTH` 또는 명확한 한글 캐스크·배럴 스트렝스가 있을 때만 `strength_type`으로 확정한다. 단독 `CS`는 `STRENGTH_ABBREVIATION` 변형 마커와 검토 사유로 남긴다. 실측 근거가 없는 `FULL STRENGTH`, `N°`, `°` 규칙은 추가하지 않는다.
 
@@ -244,7 +250,8 @@ volume_ml          = 700
 
 - 명확한 숙성 단위가 붙은 정수만 `age_years`로 저장한다.
 - `-`, 빈 문자열, `NULL`은 미상으로 처리하며 0년으로 해석하지 않는다.
-- 한글 `12년`, 영문 `12YO`, `12 YEARS OLD`, `AGED 12`를 자동 추출한다.
+- 한글 `12년`, 영문 `12YO`, `12 YEARS OLD`, `AGED 12`, `AGED 12 YEARS`를 자동 추출한다. `AGED n YEARS`는 `YEARS`까지 한 표기로 이름에서 제거한다.
+- 같은 이름(한글·영문 어느 쪽이든)에 `N주년` 또는 `N ANNIVERSARY`가 있으면 그 숫자 N은 숙성연수로 쓰지 않고, 베이스명에서도 제거하지 않는다. `HENNESSY VS 260YEARS` / `헤네시 브이 에스 260주년 에디션`은 숙성연수 없이 `HENNESSY VS 260YEARS`를 유지한다. `GLENLIVET 12YEAR OLD ... 200YEAR ANNIVERSARY`는 숙성 12를 추출한다.
 - 네 자리 숫자는 빈티지·연도·용량일 수 있으므로 숙성연수로 추출하지 않는다.
 - 명시 LOT·제조번호와 라벨 없는 LOT 구간을 먼저 분리한 뒤 남은 이름에서 빈티지를 탐색한다.
 
@@ -555,6 +562,7 @@ CREATE TABLE mfds_declarations
     name_search_key_ko                TEXT NULL,
     name_search_key_en                TEXT NULL,
     sku_candidate_key_sha256          BINARY(32) NULL,
+    product_identity_key_sha256       BINARY(32) NULL,
 
     volume_raw                        VARCHAR(255) NULL,
     volume_ml                         INT UNSIGNED NULL,
@@ -633,6 +641,7 @@ CREATE TABLE mfds_declarations
     UNIQUE KEY uk_declarations_rcno (rcno),
     KEY idx_declarations_source_item (source_item_id),
     KEY idx_declarations_sku_candidate (sku_candidate_key_sha256, unit_volume_ml),
+    KEY idx_declarations_product_identity (product_identity_key_sha256),
     KEY idx_declarations_normalization (normalization_status, updated_at),
     KEY idx_declarations_claim (normalization_status, claim_next_attempt_at, claim_lease_until),
     KEY idx_declarations_review (review_status, updated_at),
@@ -697,6 +706,9 @@ JOIN mfds_items AS i ON i.id = d.source_item_id;
 - 키 구성 요소 미상 자체는 `REVIEW_REQUIRED` 사유가 아니다. 원장 다수가 용량 미표기이며, 이를 검토로 올리면 실제 충돌 사례가 묻힌다. 미상 사실은 정보성 사유 코드로만 남긴다.
 - `REVIEW_REQUIRED`는 값 사이의 충돌 또는 문맥 모호성이 있을 때만 사용한다. 값의 부재는 충돌이 아니다.
 - 같은 `sku_candidate_key_sha256`은 동일 제품 확정이 아니라 검토 후보를 의미한다.
+- `product_identity_key_sha256`은 관리자 확정 매칭을 같은 제품의 다른 신고로 이어받을 때 쓰는 그룹 키다. 버전 문자열 `mfds-product-identity-v2`, `name_search_key_ko`, `name_search_key_en`, `abv_percent`, `age_years`, `strength_type`을 JSON 배열로 직렬화해 SHA-256을 계산한다. 값이 없는 요소는 JSON `null`로 고정하고 소수는 DB 정밀도와 같은 셋째 자리까지 반올림한다.
+- `product_identity_key_sha256`은 `sku_candidate_key_sha256`과 달리 용량을 넣지 않아 병 크기가 다른 같은 제품(예: 500ml·700ml)을 한 그룹으로 묶는다. 수입사는 병행수입 신고를 쪼개기만 하므로 넣지 않는다. 도수가 없는 신고가 많아 스트렝스 표기를 넣지 않으면 캐스크 스트렝스가 일반 제품과 섞이므로 `strength_type`은 유지한다. 미상 요소는 서로 같은 `null`이다. 빈티지·에디션은 이름 검색 키에 남아 있어 따로 넣지 않는다. 한글·영문 검색 키 중 하나라도 비어 있으면 만들지 않는다.
+- 키가 없는 기존 정제 행은 `normalize`가 끝날 때 저장된 정제 컬럼만으로 같은 Go 함수를 실행해 채우므로, 재정제 없이 채운 키와 새 정제로 만든 키가 같다.
 
 #### 정제 상태 컬럼
 
@@ -737,6 +749,8 @@ ROW_NUMBER() OVER (
 4. 정제 작업은 `UNPARSED` 또는 `STALE` 행을 처리한다.
 5. 자동 확정할 수 없는 토큰은 원문을 유지하고 `REVIEW_REQUIRED`, `review_status = 'PENDING'`, 사유를 기록한다.
 6. 어떤 경우에도 `mfds_items` 이력을 삭제하거나 갱신하지 않는다.
+
+`mfds-normalization-v4`는 성분 판정 문맥(5.3), 문장 가운데 한글 `도`(5.3), `AGED n YEARS`와 주년 숫자(5.4)를 바꾼 규칙이다. v3→v4 전환에는 data migration을 두지 않는다. 버전 문자열은 새로 정제한 행에만 기록되며, 기존 v3 행을 자동으로 `STALE`로 바꾸지 않는다. 규칙 변경으로 결과가 달라지는 RCNO만 `normalize --rcno`로 재정제한다.
 
 `mfds-normalization-v3` 전환 data migration은 `mfds-normalization-v2` 결과만 `STALE`로 바꾸고 claim 필드를 초기화한다. v2가 해외제조업소명에서 만든 증류소 후보는 `NULL`로 정리한다. DDL과 data backfill은 별도 migration으로 실행하며 둘 다 재실행 시 같은 결과를 유지한다. `00007` Down은 비가역 data update의 실행 성공만 보장하는 no-op이며, 성공 rollback이 덮어쓴 v2 상태·claim·증류소 후보를 원상복구한다는 뜻이 아니다.
 
@@ -816,6 +830,12 @@ SMALL BATCH / BATCH 3           -> 전자는 이름 유지, 후자는 숫자 배
 고량주 250ml × 20 / × 36        -> 같은 병 SKU 후보, 입수량 제외
 스트렝스 / 스트랭스             -> 영문 동일할 때만 검색키 통일
 (서울에디션)                    -> 제품명에서 제거 금지
+카발란 ... 싱글몰트 위스키 (54.8%) -> ABV 54.8, 성분 아님
+유연고량주(수수43%함유)         -> 성분 43, 함유 서술이라 검토 없음
+56도 프리미엄금문고량주(750ML)  -> ABV 56
+북경이과두주(56도)              -> ABV 56
+MATURED AGED 15 YEARS           -> 숙성 15, 베이스명에 YEARS 없음
+HENNESSY VS 260YEARS / 260주년  -> 숙성 NULL, 베이스명 유지
 2025-06-03 ~                    -> start 설정, end NULL
 ~ 2026-08-26                    -> start NULL, end 설정
 ```

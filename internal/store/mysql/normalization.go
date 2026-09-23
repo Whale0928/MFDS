@@ -317,6 +317,14 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	if err != nil {
 		return err
 	}
+	identityKey, err := nullableSHA256(fields.ProductIdentityKeySHA256)
+	if err != nil {
+		return err
+	}
+	stored, err := lockStoredSelection(ctx, tx, completion.Source.DeclarationID)
+	if err != nil {
+		return err
+	}
 
 	assign := newColumnAssignments(62)
 	// 정제 테이블만 조회해도 처리일자를 알 수 있도록 현재 원본의 값을 그대로 옮긴다.
@@ -328,6 +336,7 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	assign.set("name_search_key_ko", nullableString(fields.NameSearchKeyKO))
 	assign.set("name_search_key_en", nullableString(fields.NameSearchKeyEN))
 	assign.set("sku_candidate_key_sha256", key)
+	assign.set("product_identity_key_sha256", identityKey)
 
 	assign.set("volume_raw", nullableString(fields.VolumeRaw))
 	assign.set("volume_ml", nullableInt(fields.VolumeML))
@@ -387,12 +396,7 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	setStoredCandidates(assign, "region", storedNormalizationCandidates(fields.RegionCandidates))
 	assign.set("matching_version", nullableString(fields.MatchingVersion))
 	assign.set("matching_run_id", nullablePositiveID(fields.MatchingRunID))
-	assign.set("alcohol_match_decision", nullableString(string(fields.MatchingResult.AlcoholDecision.Status)))
-	assign.set("distillery_match_source", nullableString(fields.MatchingResult.DistilleryDecision.Source))
-	assign.set("region_match_source", nullableString(fields.MatchingResult.RegionDecision.Source))
-	assign.setExpression("selected_alcohol_id = COALESCE(selected_alcohol_id, ?)", nullablePositiveID(fields.MatchingResult.AlcoholDecision.SelectedID))
-	assign.setExpression("selected_distillery_id = COALESCE(selected_distillery_id, ?)", nullablePositiveID(fields.MatchingResult.DistilleryDecision.SelectedID))
-	assign.setExpression("selected_region_id = COALESCE(selected_region_id, ?)", nullablePositiveID(fields.MatchingResult.RegionDecision.SelectedID))
+	stored.assignMatcherDecision(assign, fields.MatchingResult)
 	assign.set("matched_at", completion.NormalizedAt)
 
 	assign.set("manufacture_country_name_ko", nullableString(fields.ManufactureCountryNameKO))
@@ -435,7 +439,7 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 		return err
 	}
 	if fields.MatchingRunID > 0 {
-		if err := saveMatchingRecords(ctx, tx, fields.MatchingRunID, completion.Source.DeclarationID, fields.MatchingResult, completion.NormalizedAt); err != nil {
+		if err := saveMatchingRecords(ctx, tx, fields.MatchingRunID, completion.Source.DeclarationID, fields.MatchingResult, completion.NormalizedAt, stored); err != nil {
 			return err
 		}
 	}
@@ -643,7 +647,7 @@ func nullableSHA256(value string) ([]byte, error) {
 	}
 	decoded, err := hex.DecodeString(value)
 	if err != nil || len(decoded) != 32 {
-		return nil, errors.New("sku candidate SHA-256은 64자리 hex 문자열이어야 합니다")
+		return nil, errors.New("SHA-256 키는 64자리 hex 문자열이어야 합니다")
 	}
 	return decoded, nil
 }

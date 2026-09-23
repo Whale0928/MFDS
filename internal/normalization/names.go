@@ -21,7 +21,7 @@ var (
 	packageTokenOnly     = regexp.MustCompile(`^[*x×X]\s*\d+\s*(?:BTLS?|BOTTLES?|EA|PCS|병)?$`)
 	abvTokenPattern      = regexp.MustCompile(`(?i)^(?:주도\s*|ALC\.?\s*)?(\d+(?:\.\d+)?)\s*(?:%|도)(?:\s*VOL\.?)?$`)
 	proofTokenPattern    = regexp.MustCompile(`(?i)^\d+(?:\.\d+)?\s*(?:PROOF|프루프)$`)
-	ageTokenPattern      = regexp.MustCompile(`(?i)^(?:\d{1,3}\s*(?:년|YO|YEARS?(?:\s+OLD)?)|AGED\s+\d{1,3})$`)
+	ageTokenPattern      = regexp.MustCompile(`(?i)^(?:\d{1,3}\s*(?:년|YO|YEARS?(?:\s+OLD)?)|AGED\s+\d{1,3}(?:\s*YEARS?(?:\s+OLD)?)?)$`)
 	caskTokenPattern     = regexp.MustCompile(`^#\s*\d+$`)
 	batchTokenPattern    = regexp.MustCompile(`(?i)^(?:BATCH|배치)\s*(?:(?:#|NO\.?)\s*)?\d+$`)
 	strengthTokenPattern = regexp.MustCompile(`(?i)^(?:(?:CASK|BARREL)\s+(?:STRENGTH|STRENGHT|STRENGH|STRENCH)|OVERPROOF|캐스크\s*(?:스트렝스|스트랭스)|(?:배럴|바렐)\s*(?:스트렝스|스트랭스))$`)
@@ -34,7 +34,11 @@ var (
 )
 
 // nameMode selects which confirmed variant tokens a derived name drops. Volume, ABV, LOT and code tokens always drop.
-type nameMode struct{ age, cask, batch, strength, proof, version bool }
+// anniversaries keeps age-shaped tokens whose number is a 주년/ANNIVERSARY number, because they are not ages.
+type nameMode struct {
+	age, cask, batch, strength, proof, version bool
+	anniversaries                              map[int]struct{}
+}
 
 var (
 	baseNameMode    = nameMode{age: true, cask: true, batch: true, strength: true, proof: true, version: true}
@@ -165,8 +169,10 @@ func standardVolume(token string, volume *volumeMatch) string {
 	}
 	return display
 }
-func baseName(value string, abv *float64, confirmedVariant string) string {
-	return buildName(value, baseNameMode, abv, confirmedVariant)
+func baseName(value string, abv *float64, confirmedVariant string, anniversaries map[int]struct{}) string {
+	mode := baseNameMode
+	mode.anniversaries = anniversaries
+	return buildName(value, mode, abv, confirmedVariant)
 }
 
 // buildName parses the name into bracket groups and separator-delimited tokens, classifies each one,
@@ -313,7 +319,7 @@ func droppableToken(value string, mode nameMode, abv *float64, confirmedVariants
 		return true
 	case mode.proof && proofTokenPattern.MatchString(token):
 		return true
-	case mode.age && ageTokenPattern.MatchString(token):
+	case mode.age && ageTokenPattern.MatchString(token) && !mode.keepsAnniversary(token):
 		return true
 	case mode.cask && isConfirmedVariantToken(token, confirmedVariants):
 		return true
@@ -323,6 +329,19 @@ func droppableToken(value string, mode nameMode, abv *float64, confirmedVariants
 		return true
 	}
 	return false
+}
+
+// keepsAnniversary reports whether an age-shaped token carries a number the name also uses as 주년 or ANNIVERSARY.
+func (m nameMode) keepsAnniversary(token string) bool {
+	if len(m.anniversaries) == 0 {
+		return false
+	}
+	parsed, err := strconv.Atoi(percentNumberPattern.FindString(token))
+	if err != nil {
+		return false
+	}
+	_, ok := m.anniversaries[parsed]
+	return ok
 }
 
 // isCodeToken accepts unlabeled LOT and material codes only. A word without digits stays in the name.
@@ -363,7 +382,12 @@ func stripTokens(value string, mode nameMode, abv *float64, confirmedVariants ..
 	}
 	if mode.age {
 		value = ageKOPattern.ReplaceAllString(value, removalMark)
-		value = ageENPattern.ReplaceAllString(value, removalMark)
+		value = ageENPattern.ReplaceAllStringFunc(value, func(match string) string {
+			if mode.keepsAnniversary(match) {
+				return match
+			}
+			return removalMark
+		})
 	}
 	if mode.batch {
 		value = batchENPattern.ReplaceAllString(value, removalMark)

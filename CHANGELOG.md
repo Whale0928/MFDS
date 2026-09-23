@@ -1,5 +1,24 @@
 # 변경 이력
 
+## 0.2.1
+
+### 변경
+
+- 재정제(`STALE`, `--rcno`, `--force`)와 `match` 백필이 관리자 확정(`CANDIDATE`, `MANUAL`)과 상속(`INHERITED`) 행의 선택 알코올·증류소·리전 ID, 결정, 출처, `inherited_from_declaration_id`를 덮어쓰지 않는다. 후보 슬롯과 매칭 실행 기록은 계속 최신 매처 결과로 갱신한다.
+- 선택값이 보존된 행에는 `mfds_matching_selections`에 `AUTO` 선택 이력을 남기지 않는다.
+- 정제 규칙을 `mfds-normalization-v4`로 올렸다. 괄호 안·문자열 끝 퍼센트와 `ALC` 앵커는 몰트·그레인·인삼 같은 품목 단어가 곁에 있어도 병 도수로 읽고, 성분 판정은 `함유`, 향·추출물 같은 함량 서술, `100% 호밀`로 한정한다. 20%를 넘는 성분 값은 검토 사유 `INGREDIENT_PERCENT_ABOVE_AUTOMATIC_RANGE`를 붙이되, `함유`나 `100% 원재료`처럼 함량을 직접 서술한 표기는 예외로 둔다.
+- 한글 `N도`는 뒤가 공백·괄호·끝이면 문장 가운데에서도 도수로 읽는다(`56도 프리미엄금문고량주`, `북경이과두주(56도)`).
+- `AGED n YEARS`의 `YEARS`를 이름에서 함께 제거하고, `주년`·`ANNIVERSARY`로 쓰인 숫자는 숙성연수로 쓰지 않는다(`HENNESSY VS 260YEARS`).
+- 규칙 버전 변경은 기존 행을 자동으로 `STALE`로 바꾸지 않는다.
+
+### 추가
+
+- 정제 결과에 제품 동일성 키 `product_identity_key_sha256`(한글·영문 검색 키, 도수, 숙성 연수, 스트렝스 표기. 용량·수입사 제외)을 저장한다. Flyway V21 컬럼을 사용한다.
+- `normalize`가 정제를 마친 뒤 키가 없는 기존 정제 행에 저장된 정제값으로 동일성 키를 채운다.
+- `normalize`가 이어서 관리자 확정을 같은 동일성 키의 다른 신고로 이어받는다(`INHERITED`). 관리자 확정이 자동 매칭보다 우선해 자동 확정 행도 덮어쓴다.
+- `normalize`가 마지막으로 알코올이 매칭된 모든 신고의 알코올명(`alcohol_name_ko/en`, 공개 수입 신고 화면 표시명)을 매칭된 알코올의 이름으로 덮어쓴다. 기본 제품명·검색 키·SKU 표시명은 원문 기준으로 유지하고, 매칭이 풀려도 이름은 되돌리지 않는다. 시드 충돌, 검토·범용명·위스키 외·제조국 불일치·관리자 해제·참조 중복 묶음을 제외하고, 시드 해제·삭제·재확정을 다음 실행에서 전파한다. `--dry-run`이면 건수만 출력한다.
+- `normalize` 결과 줄에 `identity_filled`, `inherited`, `inheritance_released`, `inheritance_conflicts`, `alcohol_names_applied`를 추가했다. 새 명령이나 옵션은 없다.
+
 ## Unreleased
 
 ### 추가

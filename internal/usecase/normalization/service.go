@@ -30,6 +30,12 @@ type Summary struct {
 	SystemFailures   int
 	RemainingPending int
 	RemainingStale   int
+	// 정제 뒤 이어지는 제품 동일성 키 채움, 관리자 매칭 상속, 매칭 알코올 이름 반영 결과다.
+	IdentityFilled       int
+	Inherited            int
+	InheritanceReleased  int
+	InheritanceConflicts int
+	AlcoholNamesApplied  int
 }
 
 type Service struct {

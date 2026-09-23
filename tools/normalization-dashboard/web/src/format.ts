@@ -24,6 +24,7 @@ const reasonLabels: Record<string, string> = {
   VARIANT_MARKER_AMBIGUOUS: '제품 변형 마커의 의미가 모호함',
   STRENGTH_ABBREVIATION_AMBIGUOUS: 'CS 약어의 캐스크 스트렝스 근거가 부족함',
   INGREDIENT_PERCENT_MULTIPLE_VALUES: '성분 비율이 여러 개라 숫자를 확정하지 않음',
+  INGREDIENT_PERCENT_ABOVE_AUTOMATIC_RANGE: '성분 비율이 20%를 넘어 병 도수인지 추가 확인 필요',
   KO_VERSION_MARKER_WITHOUT_ENGLISH_MAPPING: '한글 버전 표기에 대응하는 영문 표기가 없음',
   LOT_LABELED_EXCLUDED_FROM_SKU: 'LOT 표기는 제품 구분값에서 제외함',
   LOT_SUFFIX_CODE_EXCLUDED_FROM_SKU: '품명 끝 LOT 코드는 제품 구분값에서 제외함',

@@ -52,6 +52,7 @@ type Fields struct {
 	NameSearchKeyKO                string
 	NameSearchKeyEN                string
 	SKUCandidateKeySHA256          string
+	ProductIdentityKeySHA256       string
 	VolumeRaw                      string
 	VolumeML                       *int
 	UnitVolumeML                   *int

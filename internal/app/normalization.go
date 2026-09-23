@@ -11,6 +11,8 @@ import (
 	matchdomain "github.com/bottle-note/mfds-crawler/internal/matching"
 	parser "github.com/bottle-note/mfds-crawler/internal/normalization"
 	storemysql "github.com/bottle-note/mfds-crawler/internal/store/mysql"
+	"github.com/bottle-note/mfds-crawler/internal/usecase/identity"
+	"github.com/bottle-note/mfds-crawler/internal/usecase/inheritance"
 	usecase "github.com/bottle-note/mfds-crawler/internal/usecase/normalization"
 )
 
@@ -56,7 +58,38 @@ func runNormalization(
 	if err != nil {
 		return usecase.Summary{SystemFailures: 1}, err
 	}
-	return service.Execute(ctx, command)
+	summary, err = service.Execute(ctx, command)
+	if err != nil {
+		return summary, err
+	}
+	return summary, applyMatching(ctx, store, command.DryRun, &summary)
+}
+
+// applyMatching keys rows normalized before identity keys existed, carries administrator matches to rows of the same
+// product, and finally renames every matched row after its alcohol. All steps follow the run's dry-run flag.
+func applyMatching(ctx context.Context, store *storemysql.Store, dryRun bool, summary *usecase.Summary) error {
+	identityService, err := identity.NewService(store)
+	if err != nil {
+		return err
+	}
+	filled, err := identityService.FillMissing(ctx, dryRun)
+	summary.IdentityFilled = filled.Filled
+	if err != nil {
+		return err
+	}
+	inheritanceService, err := inheritance.NewService(store)
+	if err != nil {
+		return err
+	}
+	inherited, err := inheritanceService.Execute(ctx, dryRun)
+	summary.Inherited = inherited.Inherited
+	summary.InheritanceReleased = inherited.Released
+	summary.InheritanceConflicts = inherited.Conflicts
+	if err != nil {
+		return err
+	}
+	summary.AlcoholNamesApplied, err = store.ApplyMatchedAlcoholNames(ctx, dryRun)
+	return err
 }
 
 type parserAdapter struct {
@@ -96,6 +129,7 @@ func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) 
 			NameSearchKeyKO:                result.NameSearchKeyKO,
 			NameSearchKeyEN:                result.NameSearchKeyEN,
 			SKUCandidateKeySHA256:          result.SKUCandidateKeySHA256,
+			ProductIdentityKeySHA256:       result.ProductIdentityKeySHA256,
 			VolumeRaw:                      result.VolumeRaw,
 			VolumeML:                       result.VolumeML,
 			UnitVolumeML:                   result.UnitVolumeML,

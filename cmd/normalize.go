@@ -47,7 +47,7 @@ func newNormalizeCommand(
 			})
 			fmt.Fprintf(
 				out,
-				"normalize 결과: normalized=%d partial=%d review_required=%d unparsed=%d system_failures=%d remaining_pending=%d remaining_stale=%d dry_run=%t\n",
+				"normalize 결과: normalized=%d partial=%d review_required=%d unparsed=%d system_failures=%d remaining_pending=%d remaining_stale=%d identity_filled=%d inherited=%d inheritance_released=%d inheritance_conflicts=%d alcohol_names_applied=%d dry_run=%t\n",
 				summary.Processed[normalization.StatusNormalized],
 				summary.Processed[normalization.StatusPartial],
 				summary.Processed[normalization.StatusReviewRequired],
@@ -55,6 +55,11 @@ func newNormalizeCommand(
 				summary.SystemFailures,
 				summary.RemainingPending,
 				summary.RemainingStale,
+				summary.IdentityFilled,
+				summary.Inherited,
+				summary.InheritanceReleased,
+				summary.InheritanceConflicts,
+				summary.AlcoholNamesApplied,
 				dryRun,
 			)
 			return runErr

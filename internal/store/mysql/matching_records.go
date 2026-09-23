@@ -15,6 +15,55 @@ type matchingRecordExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+// storedSelection is the selection a declaration holds before a new matcher result is written.
+type storedSelection struct {
+	decision                          domain.DecisionStatus
+	alcoholID, distilleryID, regionID int64
+}
+
+// lockStoredSelection reads the current selection under a row lock so the write decision and the UPDATE see the same
+// state even while api-server confirms or releases the same declaration.
+func lockStoredSelection(ctx context.Context, tx *sql.Tx, declarationID int64) (storedSelection, error) {
+	var selection storedSelection
+	var decision string
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(alcohol_match_decision, ''), COALESCE(selected_alcohol_id, 0),
+		       COALESCE(selected_distillery_id, 0), COALESCE(selected_region_id, 0)
+		FROM mfds_declarations
+		WHERE id = ?
+		FOR UPDATE
+	`, declarationID).Scan(&decision, &selection.alcoholID, &selection.distilleryID, &selection.regionID)
+	if err != nil {
+		return storedSelection{}, fmt.Errorf("기존 매칭 선택 조회 실패: %w", err)
+	}
+	selection.decision = domain.DecisionStatus(decision)
+	return selection, nil
+}
+
+// assignMatcherDecision writes the matcher decision only when no administrator or inheritance decision owns the row.
+// Candidate slots and match records always follow the latest matcher; the preserved decision stays authoritative.
+func (s storedSelection) assignMatcherDecision(assign *columnAssignments, result domain.MatchResult) {
+	if s.decision.PreservesSelection() {
+		return
+	}
+	assign.set("alcohol_match_decision", nullableString(string(result.AlcoholDecision.Status)))
+	assign.set("distillery_match_source", nullableString(result.DistilleryDecision.Source))
+	assign.set("region_match_source", nullableString(result.RegionDecision.Source))
+	assign.setExpression("selected_alcohol_id = COALESCE(selected_alcohol_id, ?)", nullablePositiveID(result.AlcoholDecision.SelectedID))
+	assign.setExpression("selected_distillery_id = COALESCE(selected_distillery_id, ?)", nullablePositiveID(result.DistilleryDecision.SelectedID))
+	assign.setExpression("selected_region_id = COALESCE(selected_region_id, ?)", nullablePositiveID(result.RegionDecision.SelectedID))
+}
+
+// recordsAutoSelection reports whether the column really holds the automatic choice after the write. A preserved
+// decision or an earlier different selection kept by COALESCE must not get an AUTO SELECT history row.
+func (s storedSelection) recordsAutoSelection(targetType string, selectedID int64) bool {
+	if s.decision.PreservesSelection() {
+		return false
+	}
+	current := map[string]int64{"ALCOHOL": s.alcoholID, "DISTILLERY": s.distilleryID, "REGION": s.regionID}[targetType]
+	return current == 0 || current == selectedID
+}
+
 func (s *Store) StartMatchingRun(
 	ctx context.Context,
 	version domain.MatchingVersion,
@@ -71,6 +120,7 @@ func saveMatchingRecords(
 	declarationID int64,
 	result domain.MatchResult,
 	matchedAt time.Time,
+	stored storedSelection,
 ) error {
 	if runID <= 0 {
 		return fmt.Errorf("matching run ID가 필요합니다")
@@ -149,7 +199,8 @@ func saveMatchingRecords(
 		{"DISTILLERY", result.DistilleryDecision},
 		{"REGION", result.RegionDecision},
 	} {
-		if selection.decision.Status != domain.DecisionAutoSelected || selection.decision.SelectedID <= 0 {
+		if selection.decision.Status != domain.DecisionAutoSelected || selection.decision.SelectedID <= 0 ||
+			!stored.recordsAutoSelection(selection.targetType, selection.decision.SelectedID) {
 			continue
 		}
 		_, err = executor.ExecContext(ctx, `
