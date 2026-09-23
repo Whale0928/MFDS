@@ -110,6 +110,9 @@ type Fields struct {
 	MatchingVersion                string
 	MatchingRunID                  int64
 	MatchingResult                 matchdomain.MatchResult
+	// InheritedFromDeclarationID is set when the matcher was skipped because the identity key already has an
+	// administrator match; MatchingResult then carries that selection with an INHERITED decision.
+	InheritedFromDeclarationID int64
 }
 
 // ReferenceCandidate is one ranked BottleNote reference. Selection remains an administrator decision.

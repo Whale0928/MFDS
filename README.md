@@ -86,6 +86,11 @@ age, and strength type (cask or barrel strength). Volume and importer are left o
 empty when either search key is missing. At the end of `normalize`, previously
 normalized rows without a key get one computed from their stored normalized fields.
 
+During normalization each row computes its identity key first; when the key already has an
+administrator confirmation (`CANDIDATE`/`MANUAL`), the matcher is skipped and that alcohol,
+distillery, and region are stored as `INHERITED` right away (`admin_match_reused` on the result
+line). Automatic selections are not reused. Otherwise the matcher runs as before.
+
 After filling keys, `normalize` copies an administrator-confirmed alcohol (`CANDIDATE`/`MANUAL` on a
 normalized row whose alcohol is not deleted) to other declarations with the same identity
 key and records `INHERITED` with the seed declaration ID. Administrator confirmations win

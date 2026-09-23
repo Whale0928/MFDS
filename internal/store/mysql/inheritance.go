@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	domain "github.com/bottle-note/mfds-crawler/internal/matching"
 	"github.com/bottle-note/mfds-crawler/internal/usecase/inheritance"
 )
 
@@ -217,6 +218,14 @@ func writeInheritedSelection(ctx context.Context, tx *sql.Tx, action inheritance
 	if affected == 0 {
 		return false, nil
 	}
+	if err := insertInheritedSelections(ctx, tx, action.Current.DeclarationID, desired); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// insertInheritedSelections records one INHERITED SELECT row per selected target, naming the seed declaration.
+func insertInheritedSelections(ctx context.Context, tx *sql.Tx, declarationID int64, desired inheritance.Selection) error {
 	selectedBy := inheritedSelectedBy + strconv.FormatInt(desired.SeedDeclarationID, 10)
 	for _, selection := range []struct {
 		targetType string
@@ -230,11 +239,31 @@ func writeInheritedSelection(ctx context.Context, tx *sql.Tx, action inheritance
 		if selection.targetID <= 0 {
 			continue
 		}
-		if err := insertInheritanceSelection(ctx, tx, action.Current.DeclarationID, selection.targetType, selection.targetID, "SELECT", selection.reason, selectedBy); err != nil {
-			return false, err
+		if err := insertInheritanceSelection(ctx, tx, declarationID, selection.targetType, selection.targetID, "SELECT", selection.reason, selectedBy); err != nil {
+			return err
 		}
 	}
-	return true, nil
+	return nil
+}
+
+// assignInheritedSelection writes an administrator selection taken during normalization in place of the matcher's.
+func assignInheritedSelection(assign *columnAssignments, result domain.MatchResult, seedDeclarationID int64) {
+	assign.set("alcohol_match_decision", string(domain.DecisionInherited))
+	assign.set("selected_alcohol_id", nullablePositiveID(result.AlcoholDecision.SelectedID))
+	assign.set("selected_distillery_id", nullablePositiveID(result.DistilleryDecision.SelectedID))
+	assign.set("distillery_match_source", nullableString(result.DistilleryDecision.Source))
+	assign.set("selected_region_id", nullablePositiveID(result.RegionDecision.SelectedID))
+	assign.set("region_match_source", nullableString(result.RegionDecision.Source))
+	assign.set("inherited_from_declaration_id", seedDeclarationID)
+}
+
+// recordInheritedSelection records the history of a selection taken during normalization.
+func recordInheritedSelection(ctx context.Context, tx *sql.Tx, declarationID, seedDeclarationID int64, result domain.MatchResult) error {
+	return insertInheritedSelections(ctx, tx, declarationID, inheritance.Selection{
+		SeedDeclarationID: seedDeclarationID, AlcoholID: result.AlcoholDecision.SelectedID,
+		DistilleryID: result.DistilleryDecision.SelectedID, DistillerySource: result.DistilleryDecision.Source,
+		RegionID: result.RegionDecision.SelectedID, RegionSource: result.RegionDecision.Source,
+	})
 }
 
 // ReleaseInheritance restores the decision and selections the latest matcher run recorded, which is what normalization

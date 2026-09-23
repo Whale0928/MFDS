@@ -223,3 +223,56 @@ func TestBuildPlan_관리자확정이자동확정보다우선한다(t *testing.T
 		t.Fatalf("plan = %+v", plan)
 	}
 }
+
+func TestSeedIndex_같은키의관리자매칭을돌려주고제외조건은매처로보낸다(t *testing.T) {
+	// Given
+	index := BuildSeedIndex([]Row{seedRow(1, 140)}, testAlcohols())
+	target := func() Target {
+		return Target{DeclarationID: 50, IdentityKey: testKey, NormalizationStatus: "NORMALIZED", AlcoholCategoryEN: "Whisky", ManufactureCountryAlpha2: "GB"}
+	}
+
+	// When
+	selection, ok := index.Lookup(target())
+
+	// Then
+	want := Selection{SeedDeclarationID: 1, AlcoholID: 140, DistilleryID: 150, DistillerySource: SourceAlcoholPropagated, RegionID: 19, RegionSource: SourceAlcoholPropagated}
+	if !ok || selection != want {
+		t.Fatalf("selection = %+v, ok = %t", selection, ok)
+	}
+	excluded := map[string]Target{}
+	review := target()
+	review.NormalizationStatus = "REVIEW_REQUIRED"
+	excluded["review"] = review
+	liqueur := target()
+	liqueur.AlcoholCategoryEN = "Liqueur"
+	excluded["not whisky"] = liqueur
+	country := target()
+	country.ManufactureCountryAlpha2 = "US"
+	excluded["country"] = country
+	otherKey := target()
+	otherKey.IdentityKey = "other"
+	excluded["other key"] = otherKey
+	seedItself := target()
+	seedItself.DeclarationID = 1
+	excluded["seed itself"] = seedItself
+	for name, excludedTarget := range excluded {
+		if _, ok := index.Lookup(excludedTarget); ok {
+			t.Fatalf("%s: lookup should fall back to the matcher", name)
+		}
+	}
+}
+
+func TestSeedIndex_충돌하거나참조중복을고른시드는매처로보낸다(t *testing.T) {
+	// Given
+	conflict := BuildSeedIndex([]Row{seedRow(1, 140), seedRow(2, 141)}, testAlcohols())
+	bundle := BuildSeedIndex([]Row{seedRow(3, 7082)}, testAlcohols())
+	target := Target{DeclarationID: 50, IdentityKey: testKey, NormalizationStatus: "NORMALIZED", AlcoholCategoryEN: "Whisky", ManufactureCountryAlpha2: "GB"}
+
+	// Then
+	if _, ok := conflict.Lookup(target); ok {
+		t.Fatal("conflicting seeds must not be reused")
+	}
+	if _, ok := bundle.Lookup(target); ok {
+		t.Fatal("a seed inside a reference duplicate bundle needs the matcher")
+	}
+}

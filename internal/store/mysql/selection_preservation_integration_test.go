@@ -319,3 +319,83 @@ func TestIdentityFill_읽은뒤재정제된행은덮어쓰지않는다(t *testin
 		t.Fatalf("applied = %d, error = %v", applied, err)
 	}
 }
+
+func TestComplete_관리자매칭재사용결과는자동선택을덮어쓰고매처기록없이상속이력만남긴다(t *testing.T) {
+	// Given: 이전에 다른 알코올로 자동 확정된 행과 관리자 확정 행
+	store := normalizationStore(t)
+	fixture := newNormalizationFixture(t, store)
+	var runIDs []int64
+	cleanupMatchingChildren(t, store, &fixture.rcnos, &runIDs)
+	ctx := context.Background()
+	version := matchingdomain.MatchingVersion{RuleVersion: "matching-test", ReferenceHash: "0000000000000000000000000000000000000000000000000000000000000000"}
+	runID, err := store.StartMatchingRun(ctx, version, "normalization-test", "NORMALIZATION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runIDs = append(runIDs, runID)
+	base := time.Now().UTC().Truncate(time.Microsecond)
+	auto := fmt.Sprintf("RU-A-%d", time.Now().UnixNano())
+	admin := fmt.Sprintf("RU-M-%d", time.Now().UnixNano())
+	for _, rcno := range []string{auto, admin} {
+		fixture.item(t, rcno, "reuse-"+rcno, base, base)
+	}
+	if err := store.SyncDeclarations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	completeWithMatch(t, store, auto, "reuse-initial", runID, autoSelectedResult(77, 78, 79), base)
+	completeWithMatch(t, store, admin, "reuse-initial", runID, matchingdomain.MatchResult{}, base)
+	if _, err := store.db.Exec(`UPDATE mfds_declarations SET alcohol_match_decision = 'MANUAL', selected_alcohol_id = 900 WHERE rcno = ?`, admin); err != nil {
+		t.Fatal(err)
+	}
+	reused := matchingdomain.MatchResult{
+		AlcoholDecision:    matchingdomain.MatchDecision{Status: matchingdomain.DecisionInherited, SelectedID: 5582},
+		DistilleryDecision: matchingdomain.MatchDecision{SelectedID: 7, Source: "ALCOHOL_PROPAGATED"},
+		RegionDecision:     matchingdomain.MatchDecision{SelectedID: 8, Source: "ALCOHOL_PROPAGATED"},
+	}
+	completeReused := func(rcno string, at time.Time) {
+		if _, err := store.db.Exec(`UPDATE mfds_declarations SET normalization_status = 'STALE' WHERE rcno = ?`, rcno); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := store.Claim(ctx, normalizationRequest(rcno, "reuse-next"))
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("claim = %+v, error = %v", claimed, err)
+		}
+		if err := store.Complete(ctx, normalization.Completion{
+			Source: claimed[0],
+			Result: normalization.Result{Status: normalization.StatusNormalized, Fields: normalization.Fields{
+				MatchingVersion: "matching-test", MatchingRunID: runID, MatchingResult: reused, InheritedFromDeclarationID: 4242,
+			}},
+			NormalizationVersion: "normalization-test", NormalizedAt: at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	countRows := func(query, rcno string) int {
+		var count int
+		if err := store.db.QueryRow(query, rcno).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	recordsBefore := countRows(`SELECT COUNT(*) FROM mfds_alcohol_match_records AS a JOIN mfds_declarations AS d ON d.id = a.declaration_id WHERE d.rcno = ?`, auto)
+
+	// When
+	completeReused(auto, base.Add(time.Second))
+	completeReused(admin, base.Add(time.Second))
+
+	// Then
+	got := readSelectionState(t, store, auto)
+	if got.decision.String != "INHERITED" || got.alcoholID.Int64 != 5582 || got.distilleryID.Int64 != 7 || got.regionID.Int64 != 8 ||
+		got.inheritedFrom.Int64 != 4242 || got.distillerySource.String != "ALCOHOL_PROPAGATED" {
+		t.Fatalf("reused row = %+v", got)
+	}
+	if after := countRows(`SELECT COUNT(*) FROM mfds_alcohol_match_records AS a JOIN mfds_declarations AS d ON d.id = a.declaration_id WHERE d.rcno = ?`, auto); after != recordsBefore {
+		t.Fatalf("matcher records written for a reused match: before=%d after=%d", recordsBefore, after)
+	}
+	if inherited := countRows(`SELECT COUNT(*) FROM mfds_matching_selections AS s JOIN mfds_declarations AS d ON d.id = s.declaration_id WHERE d.rcno = ? AND s.selection_source = 'INHERITED' AND s.selected_by = 'declaration:4242'`, auto); inherited != 3 {
+		t.Fatalf("INHERITED history rows = %d, want 3", inherited)
+	}
+	if kept := readSelectionState(t, store, admin); kept.decision.String != "MANUAL" || kept.alcoholID.Int64 != 900 {
+		t.Fatalf("administrator row changed: %+v", kept)
+	}
+}

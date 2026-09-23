@@ -46,7 +46,11 @@ func runNormalization(
 		}()
 	}
 
-	service, err := usecase.NewService(store, parserAdapter{matcher: matcher, matchingRunID: matchingRunID}, usecase.Options{
+	seeds, err := loadSeedIndex(ctx, store)
+	if err != nil {
+		return usecase.Summary{SystemFailures: 1}, err
+	}
+	service, err := usecase.NewService(store, parserAdapter{matcher: matcher, matchingRunID: matchingRunID, seeds: seeds}, usecase.Options{
 		RunLimit:             cfg.Normalization.RunLimit,
 		LeaseDuration:        cfg.Normalization.LeaseDuration,
 		MaxAttempts:          cfg.Normalization.MaxAttempts,
@@ -95,6 +99,44 @@ func applyMatching(ctx context.Context, store *storemysql.Store, dryRun bool, su
 type parserAdapter struct {
 	matcher       *matchdomain.ReferenceSnapshot
 	matchingRunID int64
+	seeds         inheritance.SeedIndex
+}
+
+// loadSeedIndex reads the administrator matches once so each row can reuse them instead of running the matcher.
+func loadSeedIndex(ctx context.Context, store *storemysql.Store) (inheritance.SeedIndex, error) {
+	rows, err := store.LoadInheritanceRows(ctx)
+	if err != nil {
+		return inheritance.SeedIndex{}, err
+	}
+	alcohols, err := store.LoadInheritanceAlcohols(ctx)
+	if err != nil {
+		return inheritance.SeedIndex{}, err
+	}
+	return inheritance.BuildSeedIndex(rows, alcohols), nil
+}
+
+// match reuses an administrator match of the same identity key and skips the matcher; otherwise the matcher runs.
+func (p parserAdapter) match(source usecase.Source, result parser.Result, reasons []string) (matchdomain.MatchResult, int64) {
+	selection, ok := p.seeds.Lookup(inheritance.Target{
+		DeclarationID: source.DeclarationID, IdentityKey: result.ProductIdentityKeySHA256,
+		NormalizationStatus: string(result.Status), Reasons: reasons,
+		AlcoholCategoryEN: result.AlcoholCategoryEN, ManufactureCountryAlpha2: result.ManufactureCountry.Alpha2,
+	})
+	if ok {
+		return matchdomain.MatchResult{
+			Version:            p.matcher.Version(),
+			AlcoholDecision:    matchdomain.MatchDecision{Status: matchdomain.DecisionInherited, SelectedID: selection.AlcoholID},
+			DistilleryDecision: matchdomain.MatchDecision{SelectedID: selection.DistilleryID, Source: selection.DistillerySource},
+			RegionDecision:     matchdomain.MatchDecision{SelectedID: selection.RegionID, Source: selection.RegionSource},
+		}, selection.SeedDeclarationID
+	}
+	return p.matcher.Match(matchdomain.Input{
+		BaseNameKO: result.BaseProductNameKO, BaseNameEN: result.BaseProductNameEN,
+		SearchNameKO: result.NameSearchKeyKO, SearchNameEN: result.NameSearchKeyEN,
+		ABVPercent: result.ABVPercent, Age: result.AgeRaw, AgeYears: result.AgeYears,
+		Cask: result.CaskCandidate, Edition: result.EditionName, Category: result.AlcoholCategoryEN,
+		UnitVolumeML: result.UnitVolumeML, ManufactureCountry: result.ManufactureCountry.NameEN,
+	}), 0
 }
 
 func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) {
@@ -112,13 +154,7 @@ func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) 
 	for index, reason := range result.Reasons {
 		reasons[index] = string(reason)
 	}
-	match := p.matcher.Match(matchdomain.Input{
-		BaseNameKO: result.BaseProductNameKO, BaseNameEN: result.BaseProductNameEN,
-		SearchNameKO: result.NameSearchKeyKO, SearchNameEN: result.NameSearchKeyEN,
-		ABVPercent: result.ABVPercent, Age: result.AgeRaw, AgeYears: result.AgeYears,
-		Cask: result.CaskCandidate, Edition: result.EditionName, Category: result.AlcoholCategoryEN,
-		UnitVolumeML: result.UnitVolumeML, ManufactureCountry: result.ManufactureCountry.NameEN,
-	})
+	match, inheritedFrom := p.match(source, result, reasons)
 	return usecase.Result{
 		Status: usecase.Status(result.Status),
 		Fields: usecase.Fields{
@@ -187,6 +223,7 @@ func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) 
 			MatchingVersion:                match.Version.String(),
 			MatchingRunID:                  p.matchingRunID,
 			MatchingResult:                 match,
+			InheritedFromDeclarationID:     inheritedFrom,
 		},
 		Reasons:           reasons,
 		UnparsedFragments: result.UnparsedFragments,

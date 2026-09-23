@@ -146,28 +146,7 @@ type seedGroup struct {
 func BuildPlan(rows []Row, alcohols map[int64]Alcohol) Plan {
 	plan := Plan{InvalidSeeds: map[string]int{}, Exclusions: map[string]int{}}
 	bundles := duplicateBundles(alcohols)
-	groups := map[string]*seedGroup{}
-	for _, row := range rows {
-		if !isSeedDecision(row.Decision) {
-			continue
-		}
-		if reason := invalidSeedReason(row, alcohols); reason != "" {
-			plan.InvalidSeeds[reason]++
-			continue
-		}
-		group := groups[row.IdentityKey]
-		if group == nil {
-			group = &seedGroup{}
-			groups[row.IdentityKey] = group
-		}
-		group.seeds = append(group.seeds, row)
-	}
-	for key, group := range groups {
-		resolveGroup(key, group, alcohols, &plan)
-		if group.conflict == "" {
-			plan.SeedGroups++
-		}
-	}
+	groups := collectSeedGroups(rows, alcohols, &plan)
 
 	planned := map[string]*Group{}
 	for _, row := range rows {
@@ -225,6 +204,33 @@ func BuildPlan(rows []Row, alcohols map[int64]Alcohol) Plan {
 		return plan.Releases[i].Current.DeclarationID < plan.Releases[j].Current.DeclarationID
 	})
 	return plan
+}
+
+// collectSeedGroups groups valid administrator seeds by identity key and marks groups whose seeds disagree.
+func collectSeedGroups(rows []Row, alcohols map[int64]Alcohol, plan *Plan) map[string]*seedGroup {
+	groups := map[string]*seedGroup{}
+	for _, row := range rows {
+		if !isSeedDecision(row.Decision) {
+			continue
+		}
+		if reason := invalidSeedReason(row, alcohols); reason != "" {
+			plan.InvalidSeeds[reason]++
+			continue
+		}
+		group := groups[row.IdentityKey]
+		if group == nil {
+			group = &seedGroup{}
+			groups[row.IdentityKey] = group
+		}
+		group.seeds = append(group.seeds, row)
+	}
+	for key, group := range groups {
+		resolveGroup(key, group, alcohols, plan)
+		if group.conflict == "" {
+			plan.SeedGroups++
+		}
+	}
+	return groups
 }
 
 func isSeedDecision(decision string) bool {

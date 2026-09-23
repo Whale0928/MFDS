@@ -396,7 +396,14 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	setStoredCandidates(assign, "region", storedNormalizationCandidates(fields.RegionCandidates))
 	assign.set("matching_version", nullableString(fields.MatchingVersion))
 	assign.set("matching_run_id", nullablePositiveID(fields.MatchingRunID))
-	stored.assignMatcherDecision(assign, fields.MatchingResult)
+	// 같은 키의 관리자 매칭을 그대로 쓴 결과는 자동 매칭보다 우선하므로 기존 자동 선택도 덮어쓴다.
+	inheritedFrom := fields.InheritedFromDeclarationID
+	appliesInheritance := inheritedFrom > 0 && !stored.decision.PreservesSelection()
+	if appliesInheritance {
+		assignInheritedSelection(assign, fields.MatchingResult, inheritedFrom)
+	} else {
+		stored.assignMatcherDecision(assign, fields.MatchingResult)
+	}
 	assign.set("matched_at", completion.NormalizedAt)
 
 	assign.set("manufacture_country_name_ko", nullableString(fields.ManufactureCountryNameKO))
@@ -438,7 +445,13 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	if err := requireNormalizationLease(result, "normalization 결과 저장"); err != nil {
 		return err
 	}
-	if fields.MatchingRunID > 0 {
+	// 자동 매칭을 건너뛴 행에는 매처 실행 기록이 없으므로 상속 이력만 남긴다.
+	switch {
+	case appliesInheritance:
+		if err := recordInheritedSelection(ctx, tx, completion.Source.DeclarationID, inheritedFrom, fields.MatchingResult); err != nil {
+			return err
+		}
+	case inheritedFrom == 0 && fields.MatchingRunID > 0:
 		if err := saveMatchingRecords(ctx, tx, fields.MatchingRunID, completion.Source.DeclarationID, fields.MatchingResult, completion.NormalizedAt, stored); err != nil {
 			return err
 		}
