@@ -11,7 +11,6 @@ import (
 	"time"
 
 	domain "github.com/bottle-note/mfds-crawler/internal/matching"
-	usecase "github.com/bottle-note/mfds-crawler/internal/usecase/matching"
 	"github.com/spf13/cast"
 )
 
@@ -158,157 +157,9 @@ func (s *Store) loadReferenceAliases(ctx context.Context) ([]domain.ReferenceAli
 	return aliases, parts, nil
 }
 
-func (s *Store) ListMatchingSources(ctx context.Context, query usecase.Query) ([]usecase.Source, error) {
-	statement := `
-		SELECT id, rcno, source_item_id, normalization_version, normalized_at,
-		       COALESCE(matching_version, ''),
-		       COALESCE(base_product_name_ko, ''), COALESCE(base_product_name_en, ''),
-		       COALESCE(name_search_key_ko, ''), COALESCE(name_search_key_en, ''),
-			       abv_percent, COALESCE(age_raw, ''), age_years, COALESCE(cask_candidate, ''),
-			       unit_volume_ml, COALESCE(edition_name, ''), COALESCE(alcohol_category_en, ''),
-			       COALESCE(manufacture_country_name_en, '')
-		FROM mfds_declarations
-		WHERE normalization_status IN ('NORMALIZED', 'PARTIAL', 'REVIEW_REQUIRED', 'UNPARSED')
-		  AND normalized_at IS NOT NULL
-		  AND (? = '' OR rcno = ?)
-		  AND (? OR COALESCE(matching_version, '') <> ?)
-		ORDER BY id`
-	args := []any{query.RCNO, query.RCNO, query.Force, query.Version}
-	if query.Limit > 0 {
-		statement += " LIMIT ?"
-		args = append(args, query.Limit)
-	}
-	rows, err := s.db.QueryContext(ctx, statement, args...)
-	if err != nil {
-		return nil, fmt.Errorf("matching 대상 조회 실패: %w", err)
-	}
-	defer closeRows(rows, "matching 대상")
-	var sources []usecase.Source
-	for rows.Next() {
-		var source usecase.Source
-		var abv sql.NullFloat64
-		var age sql.NullInt64
-		var unitVolume sql.NullInt64
-		if err := rows.Scan(
-			&source.DeclarationID, &source.RCNO, &source.SourceItemID,
-			&source.NormalizationVersion, &source.NormalizedAt, &source.MatchingVersion,
-			&source.BaseProductNameKO, &source.BaseProductNameEN,
-			&source.NameSearchKeyKO, &source.NameSearchKeyEN,
-			&abv, &source.AgeRaw, &age, &source.CaskCandidate,
-			&unitVolume, &source.EditionName, &source.AlcoholCategory, &source.ManufactureCountryName,
-		); err != nil {
-			return nil, fmt.Errorf("matching 대상 scan 실패: %w", err)
-		}
-		if abv.Valid {
-			value := abv.Float64
-			source.ABVPercent = &value
-		}
-		if age.Valid {
-			value := int(age.Int64)
-			source.AgeYears = &value
-		}
-		if unitVolume.Valid {
-			value := int(unitVolume.Int64)
-			source.UnitVolumeML = &value
-		}
-		sources = append(sources, source)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("matching 대상 rows 실패: %w", err)
-	}
-	return sources, nil
-}
-
-func (s *Store) SaveMatchingResult(ctx context.Context, completion usecase.Completion) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("matching 결과 transaction 시작 실패: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	stored, err := lockStoredSelection(ctx, tx, completion.Source.DeclarationID)
-	if err != nil {
-		return err
-	}
-	assign := newColumnAssignments(28)
-	setStoredCandidates(assign, "alcohol", storedMatchingCandidates(completion.Result.Alcohols))
-	setStoredCandidates(assign, "distillery", storedMatchingCandidates(completion.Result.Distilleries))
-	setStoredCandidates(assign, "region", storedMatchingCandidates(completion.Result.Regions))
-	assign.set("matching_version", completion.Version)
-	assign.set("matched_at", completion.MatchedAt)
-	assign.set("matching_run_id", completion.RunID)
-	stored.assignMatcherDecision(assign, completion.Result)
-	result, err := tx.ExecContext(ctx, `
-			UPDATE mfds_declarations
-			SET `+assign.clause()+`
-			WHERE id = ? AND rcno = ? AND source_item_id = ?
-		  AND normalization_version = ? AND normalized_at = ?
-		  AND COALESCE(matching_version, '') = ?
-		`, assign.arguments(
-		completion.Source.DeclarationID, completion.Source.RCNO, completion.Source.SourceItemID,
-		completion.Source.NormalizationVersion, completion.Source.NormalizedAt, completion.Source.MatchingVersion,
-	)...)
-	if err != nil {
-		return fmt.Errorf("matching 결과 저장 실패: %w", err)
-	}
-	if err := requireOne(result, "matching 결과 저장"); err != nil {
-		return err
-	}
-	if err := saveMatchingRecords(ctx, tx, completion.RunID, completion.Source.DeclarationID, completion.Result, completion.MatchedAt, stored); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("matching 결과 transaction commit 실패: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) MatchingRemaining(ctx context.Context, version string) (int, error) {
-	var remaining int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM mfds_declarations
-		WHERE normalization_status IN ('NORMALIZED', 'PARTIAL', 'REVIEW_REQUIRED', 'UNPARSED')
-		  AND normalized_at IS NOT NULL
-		  AND COALESCE(matching_version, '') <> ?
-	`, version).Scan(&remaining)
-	if err != nil {
-		return 0, fmt.Errorf("남은 matching 대상 조회 실패: %w", err)
-	}
-	return remaining, nil
-}
-
-type storedCandidate struct {
-	id    int64
-	score float64
-}
-
-func setStoredCandidates(assign *columnAssignments, prefix string, candidates []storedCandidate) {
-	for index := 0; index < 3; index++ {
-		idColumn := fmt.Sprintf("%s_candidate_%d_id", prefix, index+1)
-		scoreColumn := fmt.Sprintf("%s_candidate_%d_score", prefix, index+1)
-		if index >= len(candidates) {
-			assign.set(idColumn, nil)
-			assign.set(scoreColumn, nil)
-			continue
-		}
-		assign.set(idColumn, candidates[index].id)
-		assign.set(scoreColumn, candidates[index].score)
-	}
-}
-
-func storedMatchingCandidates(candidates []domain.Candidate) []storedCandidate {
-	stored := make([]storedCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		stored = append(stored, storedCandidate{id: candidate.ID, score: candidate.Score})
-	}
-	return stored
-}
-
 func nullableReferenceTime(value *time.Time) string {
 	if value == nil {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
 }
-
-var _ usecase.Store = (*Store)(nil)

@@ -42,7 +42,7 @@ func integrationStore(t *testing.T) *Store {
 			t.Errorf("store.Close() error = %v", err)
 		}
 	})
-	if err := store.Ping(context.Background()); err != nil {
+	if err := store.db.PingContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return store

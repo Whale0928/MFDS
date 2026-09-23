@@ -217,9 +217,6 @@ func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) 
 			ExportCountryNameEN:            result.ExportCountry.NameEN,
 			ExportCountryAlpha2:            result.ExportCountry.Alpha2,
 			ExportCountryAlpha3:            result.ExportCountry.Alpha3,
-			AlcoholCandidates:              referenceCandidates(match.Alcohols),
-			DistilleryCandidates:           referenceCandidates(match.Distilleries),
-			RegionCandidates:               referenceCandidates(match.Regions),
 			MatchingVersion:                match.Version.String(),
 			MatchingRunID:                  p.matchingRunID,
 			MatchingResult:                 match,
@@ -228,16 +225,6 @@ func (p parserAdapter) Normalize(source usecase.Source) (usecase.Result, error) 
 		Reasons:           reasons,
 		UnparsedFragments: result.UnparsedFragments,
 	}, nil
-}
-
-func referenceCandidates(candidates []matchdomain.Candidate) []usecase.ReferenceCandidate {
-	result := make([]usecase.ReferenceCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		result = append(result, usecase.ReferenceCandidate{
-			ID: candidate.ID, Score: candidate.Score,
-		})
-	}
-	return result
 }
 
 func normalizationOwner() string {

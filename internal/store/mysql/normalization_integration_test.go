@@ -522,7 +522,7 @@ func TestNormalizationStore_ForceRequeue는상태와Claim필드만초기화하�
 	}
 }
 
-func TestNormalizationStore_Complete_후보를저장하고관리자선택을보존한다(t *testing.T) {
+func TestNormalizationStore_Complete_관리자선택을보존한다(t *testing.T) {
 	// Given
 	store := normalizationStore(t)
 	fixture := newNormalizationFixture(t, store)
@@ -548,10 +548,7 @@ func TestNormalizationStore_Complete_후보를저장하고관리자선택을보�
 		Result: normalization.Result{
 			Status: normalization.StatusNormalized,
 			Fields: normalization.Fields{
-				AlcoholCandidates:    []normalization.ReferenceCandidate{{ID: 1, Score: 100}, {ID: 2, Score: 60}},
-				DistilleryCandidates: []normalization.ReferenceCandidate{{ID: 11, Score: 100}, {ID: 12, Score: 60}},
-				RegionCandidates:     []normalization.ReferenceCandidate{{ID: 21, Score: 80}},
-				MatchingVersion:      "matching-test",
+				MatchingVersion: "matching-test",
 			},
 		},
 		NormalizationVersion: "normalization-test",
@@ -562,33 +559,15 @@ func TestNormalizationStore_Complete_후보를저장하고관리자선택을보�
 	if err != nil {
 		t.Fatal(err)
 	}
-	var selectedAlcohol, selectedDistillery, selectedRegion, firstAlcohol, secondAlcohol, firstDistillery, secondDistillery, firstRegion int64
-	var firstAlcoholScore, secondAlcoholScore, firstDistilleryScore, secondDistilleryScore, firstRegionScore float64
+	var selectedAlcohol, selectedDistillery, selectedRegion int64
 	if err := store.db.QueryRow(`
-		SELECT selected_alcohol_id, selected_distillery_id, selected_region_id,
-		       alcohol_candidate_1_id, alcohol_candidate_1_score,
-		       alcohol_candidate_2_id, alcohol_candidate_2_score,
-		       distillery_candidate_1_id, distillery_candidate_1_score,
-		       distillery_candidate_2_id, distillery_candidate_2_score,
-		       region_candidate_1_id, region_candidate_1_score
+		SELECT selected_alcohol_id, selected_distillery_id, selected_region_id
 		FROM mfds_declarations WHERE rcno = ?
-	`, rcno).Scan(
-		&selectedAlcohol, &selectedDistillery, &selectedRegion,
-		&firstAlcohol, &firstAlcoholScore, &secondAlcohol, &secondAlcoholScore,
-		&firstDistillery, &firstDistilleryScore, &secondDistillery, &secondDistilleryScore,
-		&firstRegion, &firstRegionScore,
-	); err != nil {
+	`, rcno).Scan(&selectedAlcohol, &selectedDistillery, &selectedRegion); err != nil {
 		t.Fatal(err)
 	}
 	if selectedAlcohol != 900 || selectedDistillery != 901 || selectedRegion != 902 {
 		t.Fatalf("selected IDs changed: alcohol=%d distillery=%d region=%d", selectedAlcohol, selectedDistillery, selectedRegion)
-	}
-	if firstAlcohol != 1 || firstAlcoholScore != 100 || secondAlcohol != 2 || secondAlcoholScore != 60 ||
-		firstDistillery != 11 || firstDistilleryScore != 100 || secondDistillery != 12 || secondDistilleryScore != 60 ||
-		firstRegion != 21 || firstRegionScore != 80 {
-		t.Fatalf("candidate slots mismatch: alcohol=(%d,%.2f),(%d,%.2f) distillery=(%d,%.2f),(%d,%.2f) region=(%d,%.2f)",
-			firstAlcohol, firstAlcoholScore, secondAlcohol, secondAlcoholScore,
-			firstDistillery, firstDistilleryScore, secondDistillery, secondDistilleryScore, firstRegion, firstRegionScore)
 	}
 }
 

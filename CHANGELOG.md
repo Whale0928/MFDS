@@ -1,5 +1,19 @@
 # 변경 이력
 
+## 0.2.2
+
+### 삭제
+
+- 운영·개발 `CronJob`이 실행하지 않는 CLI 명령을 삭제했다. 남은 명령은 `collect-recent`와 `normalize`(`--limit`, `--rcno`, `--dry-run`, `--force`) 두 개다.
+  - `collect`: `--from`, `--to`, `--workers`로 기간을 지정하던 수집 명령. 최근 7일 수집은 `collect-recent`가 맡는다.
+  - `match`: 정제된 행의 매칭 백필 명령. 매칭은 `normalize`가 정제와 함께 계산한다.
+  - `health`: 설정과 MySQL 연결 확인 명령.
+  - `reference-sync`: 기준 데이터 동기화 명령과 `internal/reference` 패키지.
+- 정제 결과 대시보드(`tools/normalization-dashboard`)와 Taskfile의 `dashboard:*` 태스크, `task health`를 삭제했다.
+- 검증 스크립트 `tools/verification-harness.sh`를 삭제했다.
+- `match` 백필 전용 코드(`internal/usecase/matching`, 저장소의 `ListMatchingSources`, `SaveMatchingResult`, `MatchingRemaining`)와 테스트를 삭제했다.
+- 정제 결과 테이블의 후보 1~3 슬롯 컬럼을 더 이상 쓰지 않는다. 매칭 후보는 `mfds_matching_candidates` 이력에 계속 기록한다.
+
 ## 0.2.1
 
 ### 변경

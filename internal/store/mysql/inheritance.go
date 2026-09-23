@@ -25,7 +25,13 @@ func (s *Store) LoadInheritanceRows(ctx context.Context) ([]inheritance.Row, err
 		       COALESCE(d.alcohol_match_decision, ''), COALESCE(d.selected_alcohol_id, 0),
 		       COALESCE(d.selected_distillery_id, 0), COALESCE(d.selected_region_id, 0),
 		       COALESCE(d.distillery_match_source, ''), COALESCE(d.region_match_source, ''),
-		       COALESCE(d.inherited_from_declaration_id, 0), COALESCE(d.alcohol_candidate_1_id, 0),
+		       COALESCE(d.inherited_from_declaration_id, 0),
+		       COALESCE((
+		           SELECT c.target_id
+		           FROM mfds_matching_candidates AS c
+		           WHERE c.declaration_id = d.id AND c.run_id = d.matching_run_id
+		             AND c.target_type = 'ALCOHOL' AND c.rank_no = 1
+		       ), 0),
 		       COALESCE((
 		           SELECT s.action
 		           FROM mfds_matching_selections AS s

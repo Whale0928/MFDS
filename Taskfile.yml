@@ -1,11 +1,5 @@
 version: '3.17'
 
-includes:
-  dashboard:
-    desc: 정제 결과 대시보드
-    taskfile: tools/normalization-dashboard/Taskfile.yml
-    dir: tools/normalization-dashboard
-
 tasks:
   default:
     desc: 사용 가능한 작업을 표시합니다
@@ -84,11 +78,6 @@ tasks:
     desc: MySQL 컨테이너를 중지합니다
     cmds:
       - docker compose --env-file .env.local down
-
-  health:
-    desc: CLI 설정과 MySQL 연결을 확인합니다
-    cmds:
-      - go run . health
 
   migrate:
     desc: BottleNote Flyway migration을 로컬 MySQL에 적용합니다

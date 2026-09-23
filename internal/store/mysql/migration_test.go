@@ -29,8 +29,7 @@ func TestFlywayV11_MFDS신규스키마만추가한다(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"CREATE VIEW MFDS_DECLARATION_DETAILS", "MANUFACTURER_NAME", "ALCOHOL_CANDIDATE_1_ID",
-		"DISTILLERY_CANDIDATE_1_ID", "REGION_CANDIDATE_1_ID", "MATCHING_RUN_ID",
+		"CREATE VIEW MFDS_DECLARATION_DETAILS", "MANUFACTURER_NAME", "MATCHING_RUN_ID",
 		"UPSTREAM_TARGET_ID",
 	} {
 		if !strings.Contains(sql, required) {
