@@ -74,7 +74,40 @@ After fixing a system error, recover an RCNO that exhausted its retry limit with
 MFDS reads the canonical `alcohols`, `distilleries`, and `regions` tables from
 the same BottleNote database. Primary normalization writes ranked distillery
 and region candidates, while `match` backfills already-normalized mfds_declarations.
-Both paths preserve administrator-selected IDs.
+Candidate slots and matching run records always follow the latest matcher. A row whose
+`alcohol_match_decision` is `CANDIDATE` or `MANUAL` (administrator confirmation) or
+`INHERITED` keeps its selected alcohol, distillery, and region IDs, decision, sources,
+and `inherited_from_declaration_id` through re-collection, `STALE`, `--rcno`, `--force`,
+and `match`, and gets no `AUTO` selection history row. Other rows keep an existing
+selected ID and record `AUTO` history only when the column holds the automatic choice.
+
+Normalization stores `product_identity_key_sha256`: both language search keys, ABV,
+age, and strength type (cask or barrel strength). Volume and importer are left out. It is
+empty when either search key is missing. At the end of `normalize`, previously
+normalized rows without a key get one computed from their stored normalized fields.
+
+During normalization each row computes its identity key first; when the key already has an
+administrator confirmation (`CANDIDATE`/`MANUAL`), the matcher is skipped and that alcohol,
+distillery, and region are stored as `INHERITED` right away (`admin_match_reused` on the result
+line). Automatic selections are not reused. Otherwise the matcher runs as before.
+
+After filling keys, `normalize` copies an administrator-confirmed alcohol (`CANDIDATE`/`MANUAL` on a
+normalized row whose alcohol is not deleted) to other declarations with the same identity
+key and records `INHERITED` with the seed declaration ID. Administrator confirmations win
+over automatic matches, so auto-selected rows are overwritten too. It skips
+`REVIEW_REQUIRED`, generic product names, non-whisky rows, manufacture country
+mismatches, rows an administrator released, and reference duplicate bundles unless the
+target's top candidate is in the same bundle. A key whose seeds choose different
+alcohols is reported as a conflict and left untouched. Distillery and region copy the
+seed's values as `INHERITED`, otherwise the alcohol's positive IDs as
+`ALCOHOL_PROPAGATED`. When a seed is released, deleted, or reassigned, the next run
+updates or restores the inherited rows. Finally, every matched declaration (automatic,
+administrator, or inherited) gets its alcohol names (`alcohol_name_ko/en`, the name the public
+import page shows) replaced with the matched alcohol's `kor_name`/`eng_name`. Base product names,
+search keys, and SKU display names stay source-based, and names are not restored when a match is
+later cleared. With `--dry-run`, key filling and inheritance
+write nothing and only report counts on the result line (`identity_filled`, `inherited`,
+`inheritance_released`, `inheritance_conflicts`, `alcohol_names_applied`).
 
 ## Configuration
 
@@ -124,6 +157,8 @@ internal/normalization/      pure normalization rules and parsers
 internal/matching/           immutable alcohol, distillery, and region matcher
 internal/usecase/normalization/ normalization batch and state transitions
 internal/usecase/matching/   matching dry-run and backfill orchestration
+internal/usecase/identity/   fills missing product identity keys
+internal/usecase/inheritance/ administrator match inheritance planning and writes
 internal/store/mysql/        ledger and normalization persistence
 data/config.yaml             non-secret runtime constants
 ```

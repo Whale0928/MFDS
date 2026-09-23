@@ -4,7 +4,7 @@ package normalization
 import "time"
 
 // Version identifies this deterministic rule set in the derived declaration row.
-const Version = "mfds-normalization-v3"
+const Version = "mfds-normalization-v4"
 
 const (
 	StatusNormalized     Status = "NORMALIZED"
@@ -45,6 +45,7 @@ const (
 	ReasonBatchLanguageMismatch                    Reason = "BATCH_VALUE_CONFLICT"
 	ReasonEditionLanguageMismatch                  Reason = "EDITION_VALUE_CONFLICT"
 	ReasonIngredientPercentMultiple                Reason = "INGREDIENT_PERCENT_MULTIPLE_VALUES"
+	ReasonIngredientPercentHigh                    Reason = "INGREDIENT_PERCENT_ABOVE_AUTOMATIC_RANGE"
 	ReasonKOVersionMarker                          Reason = "KO_VERSION_MARKER_WITHOUT_ENGLISH_MAPPING"
 	ReasonParenthesisSemanticText                  Reason = "PARENTHESIS_SEMANTIC_TEXT"
 	ReasonGenericProductName                       Reason = "GENERIC_PRODUCT_NAME_REVIEW_REQUIRED"
@@ -118,6 +119,7 @@ type Result struct {
 	ManufactureCountry                   Country
 	ExportCountry                        Country
 	SKUCandidateKeySHA256                string
+	ProductIdentityKeySHA256             string
 	Status                               Status
 	Reasons                              []Reason
 	UnparsedFragments                    []string

@@ -72,8 +72,38 @@ task run -- match --all
 
 MFDS는 같은 BottleNote 데이터베이스의 `alcohols`, `distilleries`, `regions`
 원본 테이블을 직접 조회합니다. 1차 정제는 증류소·리전 후보를 함께 저장하고,
-`match`는 이미 정제된 행을 백필합니다. 두 경로 모두 관리자가 선택한 ID는
-변경하지 않습니다.
+`match`는 이미 정제된 행을 백필합니다. 후보 슬롯과 매칭 실행 기록은 두 경로 모두
+최신 매처 결과로 갱신합니다. `alcohol_match_decision`이 관리자 확정(`CANDIDATE`,
+`MANUAL`) 또는 상속(`INHERITED`)인 행은 재수집, `STALE`, `--rcno`, `--force`,
+`match`를 거쳐도 선택한 알코올·증류소·리전 ID, 결정, 출처,
+`inherited_from_declaration_id`를 유지하고 `AUTO` 선택 이력을 남기지 않습니다. 그 밖의
+행은 기존 선택 ID를 보존하며, 컬럼에 자동 선택값이 실제로 들어간 경우에만 `AUTO`
+이력을 기록합니다.
+
+정제 결과에는 `product_identity_key_sha256`을 함께 저장합니다. 한글·영문 검색 키, 도수,
+숙성 연수, 스트렝스 표기(캐스크·배럴 스트렝스)로 만들며 용량과 수입사는 넣지 않습니다. 검색 키가
+한쪽이라도 없으면 비워 둡니다. 키가 없는 기존 정제 행은 `normalize`가 끝날 때 저장된
+정제값으로 같은 키를 계산해 채웁니다.
+
+정제 중에는 신고마다 동일성 키를 계산한 뒤, 같은 키에 관리자 확정(`CANDIDATE`/`MANUAL`)이 있으면 자동
+매칭 계산을 건너뛰고 그 알코올·증류소·리전을 바로 `INHERITED`로 저장합니다(결과 줄 `admin_match_reused`). 자동
+확정은 기준으로 인정하지 않습니다. 관리자 확정이 없거나 제외 조건에 걸리면 기존처럼 자동 매칭을 계산합니다.
+
+`normalize`는 키 채움 뒤 관리자 확정(`CANDIDATE`/`MANUAL`, 정제 완료 상태, 삭제되지 않은 알코올)을
+같은 제품 동일성 키의 다른 신고로 이어받고 `INHERITED`와 시드 declaration ID를
+기록합니다. 관리자 확정이 자동 매칭보다 우선하므로 자동 확정된 신고도 덮어씁니다. `REVIEW_REQUIRED`, 범용 제품명, 위스키 외 카테고리, 제조국 불일치, 관리자가
+해제한 행은 제외합니다. 시드가 원장으로 구분할 수 없는 참조 중복 묶음 중 하나를 골랐다면
+대상의 1순위 후보가 같은 묶음일 때만 이어받습니다. 같은 키의 시드들이 서로 다른
+알코올을 고르면 충돌로 보고하고 채우지 않습니다. 증류소·리전은 시드 값이 있으면
+`INHERITED`로, 없으면 선택 알코올의 양수 ID를 `ALCOHOL_PROPAGATED`로 채웁니다. 시드가
+해제·삭제·재확정되면 다음 실행에서 상속 행을 갱신하거나 매처 결과로 되돌립니다.
+
+마지막으로 알코올이 매칭된 모든 신고(자동 확정·관리자 확정·상속)의 알코올명(`alcohol_name_ko/en`,
+공개 수입 신고 화면이 표시하는 이름)을 매칭된 알코올의 `kor_name`/`eng_name`으로 덮어씁니다. 기본 제품명,
+검색 키, SKU 표시명은 원문 기준으로 두어 동일성 그룹과 신고별 용량·도수 표기를 유지합니다. 매칭이 풀려도
+이름은 되돌리지 않습니다.
+`--dry-run`이면 키 채움과 상속도 저장하지 않고 건수만 결과 줄(`identity_filled`, `inherited`,
+`inheritance_released`, `inheritance_conflicts`, `alcohol_names_applied`)에 출력합니다.
 
 ## 설정
 
@@ -120,6 +150,8 @@ internal/normalization/      순수 정제 규칙과 파서
 internal/matching/           불변 alcohol·증류소·리전 matcher
 internal/usecase/normalization/ 정제 batch와 상태 전이
 internal/usecase/matching/   매칭 dry-run과 백필 조정
+internal/usecase/identity/   빠진 제품 동일성 키 채움
+internal/usecase/inheritance/ 관리자 확정 매칭 상속 계획과 적용
 internal/store/mysql/        원장과 정제 결과 저장
 data/config.yaml             비밀이 아닌 고정 실행값
 ```

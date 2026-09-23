@@ -5,8 +5,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 )
+
+// maximumAutomaticIngredientPercent is the largest ingredient share accepted without review.
+const maximumAutomaticIngredientPercent = 20
 
 type abvPattern struct {
 	expression              *regexp.Regexp
@@ -19,16 +21,22 @@ type percentOccurrence struct {
 	value      float64
 	start, end int
 	explicit   bool
+	// statement는 함유나 100% 원재료처럼 함량을 직접 서술한 표기다.
+	statement bool
 }
 
 var (
-	compositionPattern = regexp.MustCompile(`(?i)인삼|송이|향료?|과즙|농축(?:액)?|원액|함유|추출물|침출액|주스|시럽|꿀|설탕|보리|호밀|몰트|곡물|아가베|RYE|ISLAY|POIRE|PEAR|APPLE|FRUIT|JUICE|EXTRACT|FLAVOU?R|CONCENTRATE|HONEY|SUGAR|MALT|GRAIN|AGAVE`)
-	ingredientPrefix   = regexp.MustCompile(`(?i)(?:인삼|송이|향료?|과즙|농축(?:액)?|원액|추출물|침출액|주스|시럽|꿀|설탕|보리|호밀|몰트|곡물|아가베|RYE|ISLAY|POIRE|PEAR|APPLE|FRUIT|JUICE|EXTRACT|FLAVOU?R|CONCENTRATE|HONEY|SUGAR|MALT|GRAIN|AGAVE)\s*[:=]?\s*$`)
-	percentPattern     = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
-	proofPattern       = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:PROOF|프루프)`)
+	// 성분 판정은 함량을 서술하는 문맥으로만 한정한다. 몰트·그레인·인삼 같은 품목 단어가 근처에 있다는 이유만으로
+	// 병 도수를 성분으로 보내면 카발란 싱글몰트 (54.8%) 같은 도수가 abv_percent에서 빠진다.
+	ingredientPrefix       = regexp.MustCompile(`(?i)(?:인삼|송이|향료?|과즙|농축(?:액)?|원액|추출물|증류액|침출액|주스|시럽|꿀|설탕|함량|고형분|JUICE|EXTRACT|FLAVOU?R|CONCENTRATE|HONEY|SUGAR)\s*[:=]?\s*$`)
+	ingredientSuffix       = regexp.MustCompile(`^\s*함유`)
+	wholeIngredientPattern = regexp.MustCompile(`(?i)^\s*(?:호밀|보리|몰트|곡물|아가베|아일라|포아르|RYE|ISLAY|MALT|GRAIN|AGAVE|BARLEY|WHEAT|POIRE|PEAR|APPLE)`)
+	percentPattern         = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*%`)
+	percentNumberPattern   = regexp.MustCompile(`\d+(?:\.\d+)?`)
+	proofPattern           = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:PROOF|프루프)`)
 
-	strongABVPattern = regexp.MustCompile(`(?i)(?:주도\s*|ALC\.?\s*|ABV\s*[:.]?\s*)\d+(?:\.\d+)?\s*(?:%|도)|\(\s*\d+(?:\.\d+)?\s*%\s*(?:,\s*\d+(?:\.\d+)?\s*(?:ML|L))?\s*\)|(?:^|[\s(])\d+(?:\.\d+)?\s*%\s*(?:VOL\.?\b|,?\s*\d+(?:\.\d+)?\s*(?:ML|L)\b|$)|(?:^|\s)\d+(?:\.\d+)?\s*도\s*$`)
-	koABVPattern     = regexp.MustCompile(`(?:주도\s*)\d+(?:\.\d+)?\s*(?:%|도)|(?:^|\s)\d+(?:\.\d+)?\s*도\s*$`)
+	strongABVPattern = regexp.MustCompile(`(?i)(?:주도\s*|ALC\.?\s*|ABV\s*[:.]?\s*)\d+(?:\.\d+)?\s*(?:%|도)|\(\s*\d+(?:\.\d+)?\s*%\s*(?:,\s*\d+(?:\.\d+)?\s*(?:ML|L))?\s*\)|(?:^|[\s(])\d+(?:\.\d+)?\s*%\s*(?:VOL\.?\b|,?\s*\d+(?:\.\d+)?\s*(?:ML|L)\b|$)|(?:^|[\s(\[])\d+(?:\.\d+)?\s*도(?:[\s()\[\]]|$)`)
+	koABVPattern     = regexp.MustCompile(`(?:주도\s*)\d+(?:\.\d+)?\s*(?:%|도)|(?:^|[\s(\[])\d+(?:\.\d+)?\s*도(?:[\s()\[\]]|$)`)
 
 	strengthPattern  = regexp.MustCompile(`(?i)\b(?:CASK|BARREL)\s+(?:STRENGTH|STRENGHT|STRENGH|STRENCH)\b|\bOVERPROOF\b|캐스크\s*(?:스트렝스|스트랭스)|(?:배럴|바렐)\s*(?:스트렝스|스트랭스)`)
 	englishStrength  = regexp.MustCompile(`(?i)\b(CASK|BARREL)\s+(?:STRENGTH|STRENGHT|STRENGH|STRENCH)\b`)
@@ -44,7 +52,8 @@ var (
 		{regexp.MustCompile(`(?i)(?:^|[\s(])(\d+(?:\.\d+)?)\s*%\s*VOL\.?\b`), 1, true},
 		{regexp.MustCompile(`\(\s*(\d+(?:\.\d+)?)\s*%\s*\)`), 1, false},
 		{regexp.MustCompile(`(?:^|\s)(\d+(?:\.\d+)?)\s*%\s*$`), 1, false},
-		{regexp.MustCompile(`(?:^|\s)(\d+(?:\.\d+)?)\s*도\s*$`), 1, false},
+		// 한글 도 표기는 뒤가 공백·괄호·끝일 때만 도수로 본다. 56도 프리미엄금문고량주(750ML), 북경이과두주(56도)가 이 경우다.
+		{regexp.MustCompile(`(?:^|[\s(\[])(\d+(?:\.\d+)?)\s*도(?:[\s()\[\]]|$)`), 1, false},
 	}
 )
 
@@ -72,7 +81,13 @@ func parseIngredientPercent(ko, en string, state *derivationState) {
 	state.structured++
 	state.add(ReasonABVCompositionContext)
 	if len(order) == 1 {
-		state.result.IngredientPercent = floatPointer(seen[order[0]].value)
+		value := seen[order[0]].value
+		state.result.IngredientPercent = floatPointer(value)
+		// 20%를 넘는 성분 함량은 병 도수를 잘못 분류했을 가능성이 커서 자동 확정하지 않는다.
+		// 함유나 100% 원재료처럼 함량을 직접 서술한 표기는 병 도수로 읽힐 여지가 없어 예외로 둔다.
+		if value > maximumAutomaticIngredientPercent && !seen[order[0]].statement {
+			state.review(ReasonIngredientPercentHigh, seen[order[0]].raw)
+		}
 		return
 	}
 	state.review(ReasonIngredientPercentMultiple, state.result.IngredientPercentRaw)
@@ -88,7 +103,10 @@ func ingredientPercentOccurrences(value string) []percentOccurrence {
 		if err != nil {
 			continue
 		}
-		result = append(result, percentOccurrence{raw: strings.TrimSpace(value[indexes[0]:indexes[1]]), value: parsed, start: indexes[0], end: indexes[1]})
+		result = append(result, percentOccurrence{
+			raw: strings.TrimSpace(value[indexes[0]:indexes[1]]), value: parsed, start: indexes[0], end: indexes[1],
+			statement: isIngredientStatementAt(value, indexes[0], indexes[1]),
+		})
 	}
 	return result
 }
@@ -107,18 +125,21 @@ func explicitABVAnchorContains(value string, start, end int) bool {
 	return false
 }
 
+// isIngredientPercentAt accepts only a content statement: an ingredient noun right before the percent, 함유 right after
+// it, or 100% naming the whole raw material such as 100% 호밀. A grain or fruit word elsewhere in the name does not decide it.
 func isIngredientPercentAt(value string, start, end int) bool {
-	runes := []rune(value)
-	startRune := utf8.RuneCountInString(value[:start])
-	endRune := startRune + utf8.RuneCountInString(value[start:end])
-	windowStart, windowEnd := startRune-16, endRune+16
-	if windowStart < 0 {
-		windowStart = 0
+	return isExplicitIngredientPercentAt(value, start) || isIngredientStatementAt(value, start, end)
+}
+
+// isIngredientStatementAt reports 함유 right after the percent or 100% naming the whole raw material.
+func isIngredientStatementAt(value string, start, end int) bool {
+	// 앵커 패턴은 숫자 부분만 넘기므로 뒤따르는 % 기호를 건너뛴 위치에서 함유 서술을 확인한다.
+	rest := strings.TrimPrefix(strings.TrimLeft(value[end:], " "), "%")
+	if ingredientSuffix.MatchString(rest) {
+		return true
 	}
-	if windowEnd > len(runes) {
-		windowEnd = len(runes)
-	}
-	return compositionPattern.MatchString(string(runes[windowStart:windowEnd]))
+	parsed, err := strconv.ParseFloat(percentNumberPattern.FindString(value[start:end]), 64)
+	return err == nil && parsed == 100 && wholeIngredientPattern.MatchString(rest)
 }
 
 func parseABV(ko, en string, state *derivationState) {
@@ -126,9 +147,7 @@ func parseABV(ko, en string, state *derivationState) {
 	ingredientValues := map[string]struct{}{}
 	for _, source := range []string{ko, en} {
 		for _, occurrence := range ingredientPercentOccurrences(source) {
-			if isExplicitIngredientPercentAt(source, occurrence.start) {
-				ingredientValues[formatNumber(occurrence.value)] = struct{}{}
-			}
+			ingredientValues[formatNumber(occurrence.value)] = struct{}{}
 		}
 	}
 	for _, source := range []string{ko, en} {

@@ -8,9 +8,13 @@ import (
 )
 
 var (
-	ageKOPattern   = regexp.MustCompile(`(\d{1,3})\s*년(?:\s|$|[)\],-])`)
-	ageENPattern   = regexp.MustCompile(`(?i)(\d{1,3})\s*(?:YO\b|YEARS?(?:\s+OLD)?\b)|\bAGED\s+(\d{1,3})\b`)
-	vintagePattern = regexp.MustCompile(`\b((?:1[5-9]|20)\d{2})\b`)
+	ageKOPattern = regexp.MustCompile(`(\d{1,3})\s*년(?:\s|$|[)\],-])`)
+	// AGED n 뒤의 YEARS까지 한 표기로 소비해야 베이스명에 YEARS가 남지 않는다.
+	ageENPattern = regexp.MustCompile(`(?i)(\d{1,3})\s*(?:YO\b|YEARS?(?:\s+OLD)?\b)|\bAGED\s+(\d{1,3})(?:\s*YEARS?(?:\s+OLD)?)?\b`)
+	// 기념 연수는 숙성연수가 아니다. 헤네시 260주년의 HENNESSY VS 260YEARS처럼 다른 언어에만 YEARS로 붙기도 한다.
+	anniversaryKOPattern = regexp.MustCompile(`(\d{1,3})\s*주년`)
+	anniversaryENPattern = regexp.MustCompile(`(?i)(\d{1,3})\s*(?:ST|ND|RD|TH)?\s*(?:YEARS?\s+)?ANNIVERSARY`)
+	vintagePattern       = regexp.MustCompile(`\b((?:1[5-9]|20)\d{2})\b`)
 )
 
 const (
@@ -19,30 +23,28 @@ const (
 )
 
 func parseAge(ko, en string, state *derivationState) {
+	anniversaries := anniversaryNumbers(ko, en)
 	values := []int{}
 	raw := ""
 	for _, source := range []struct {
 		value string
 		ko    bool
 	}{{ko, true}, {en, false}} {
-		var match []string
+		pattern := ageENPattern
 		if source.ko {
-			match = ageKOPattern.FindStringSubmatch(source.value)
-		} else {
-			match = ageENPattern.FindStringSubmatch(source.value)
+			pattern = ageKOPattern
 		}
-		if len(match) == 0 {
-			continue
-		}
-		for _, part := range match[1:] {
-			if part == "" {
+		for _, match := range pattern.FindAllStringSubmatch(source.value, -1) {
+			parsed, ok := ageMatchValue(match)
+			if !ok {
 				continue
 			}
-			if parsed, err := strconv.Atoi(part); err == nil {
-				values = append(values, parsed)
-				if raw == "" {
-					raw = match[0]
-				}
+			if _, anniversary := anniversaries[parsed]; anniversary {
+				continue
+			}
+			values = append(values, parsed)
+			if raw == "" {
+				raw = match[0]
 			}
 			break
 		}
@@ -61,6 +63,34 @@ func parseAge(ko, en string, state *derivationState) {
 	state.structured++
 	state.add(ReasonAgeExtracted)
 }
+
+func ageMatchValue(match []string) (int, bool) {
+	for _, part := range match[1:] {
+		if part == "" {
+			continue
+		}
+		parsed, err := strconv.Atoi(part)
+		return parsed, err == nil
+	}
+	return 0, false
+}
+
+// anniversaryNumbers collects numbers written as 주년 or ANNIVERSARY in either language of the same name.
+func anniversaryNumbers(ko, en string) map[int]struct{} {
+	numbers := map[int]struct{}{}
+	for _, found := range [][][]string{
+		anniversaryKOPattern.FindAllStringSubmatch(ko, -1),
+		anniversaryENPattern.FindAllStringSubmatch(en, -1),
+	} {
+		for _, match := range found {
+			if parsed, err := strconv.Atoi(match[1]); err == nil {
+				numbers[parsed] = struct{}{}
+			}
+		}
+	}
+	return numbers
+}
+
 func parseVintage(ko, en string, state *derivationState) {
 	// Section 5.4 requires LOT, manufacture number and unlabeled code sections to be separated before a vintage is searched.
 	value := buildName(ko, baseNameMode, nil) + " " + buildName(en, baseNameMode, nil)

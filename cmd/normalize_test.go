@@ -126,7 +126,7 @@ func TestNormalize_DryRun_Runner결과를출력한다(t *testing.T) {
 		}
 		return normalization.Summary{Processed: map[normalization.Status]int{
 			normalization.StatusPartial: 1,
-		}, RemainingPending: 3, RemainingStale: 2}, nil
+		}, RemainingPending: 3, RemainingStale: 2, AdminMatchReused: 9, IdentityFilled: 4, Inherited: 5, InheritanceReleased: 6, InheritanceConflicts: 7, AlcoholNamesApplied: 8}, nil
 	}, output)
 	command.SetArgs([]string{"--dry-run"})
 
@@ -137,7 +137,7 @@ func TestNormalize_DryRun_Runner결과를출력한다(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	want := "normalize 결과: normalized=0 partial=1 review_required=0 unparsed=0 system_failures=0 remaining_pending=3 remaining_stale=2 dry_run=true\n"
+	want := "normalize 결과: normalized=0 partial=1 review_required=0 unparsed=0 system_failures=0 remaining_pending=3 remaining_stale=2 admin_match_reused=9 identity_filled=4 inherited=5 inheritance_released=6 inheritance_conflicts=7 alcohol_names_applied=8 dry_run=true\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}

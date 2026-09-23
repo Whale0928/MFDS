@@ -136,7 +136,18 @@ const (
 	DecisionReview         DecisionStatus = "REVIEW"
 	DecisionNoMatch        DecisionStatus = "NO_MATCH"
 	DecisionConflictReview DecisionStatus = "CONFLICT_REVIEW"
+
+	// 아래 세 결정은 매처가 만들지 않는다. CANDIDATE·MANUAL은 관리자가 확정했고(api-server), INHERITED는 같은 제품의
+	// 관리자 확정을 이어받았다는 뜻이다. 재정제와 재매칭은 이 결정을 가진 행의 선택·결정·출처를 바꾸지 않는다.
+	DecisionCandidate DecisionStatus = "CANDIDATE"
+	DecisionManual    DecisionStatus = "MANUAL"
+	DecisionInherited DecisionStatus = "INHERITED"
 )
+
+// PreservesSelection reports whether a stored decision belongs to an administrator or inheritance, not the matcher.
+func (s DecisionStatus) PreservesSelection() bool {
+	return s == DecisionCandidate || s == DecisionManual || s == DecisionInherited
+}
 
 // MatchDecision records why one target was selected, deferred, or rejected.
 type MatchDecision struct {

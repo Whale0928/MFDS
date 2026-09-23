@@ -52,6 +52,7 @@ type Fields struct {
 	NameSearchKeyKO                string
 	NameSearchKeyEN                string
 	SKUCandidateKeySHA256          string
+	ProductIdentityKeySHA256       string
 	VolumeRaw                      string
 	VolumeML                       *int
 	UnitVolumeML                   *int
@@ -109,6 +110,9 @@ type Fields struct {
 	MatchingVersion                string
 	MatchingRunID                  int64
 	MatchingResult                 matchdomain.MatchResult
+	// InheritedFromDeclarationID is set when the matcher was skipped because the identity key already has an
+	// administrator match; MatchingResult then carries that selection with an INHERITED decision.
+	InheritedFromDeclarationID int64
 }
 
 // ReferenceCandidate is one ranked BottleNote reference. Selection remains an administrator decision.

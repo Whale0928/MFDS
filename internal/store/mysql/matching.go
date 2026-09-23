@@ -220,34 +220,30 @@ func (s *Store) ListMatchingSources(ctx context.Context, query usecase.Query) ([
 }
 
 func (s *Store) SaveMatchingResult(ctx context.Context, completion usecase.Completion) error {
-	assign := newColumnAssignments(20)
-	setStoredCandidates(assign, "alcohol", storedMatchingCandidates(completion.Result.Alcohols))
-	setStoredCandidates(assign, "distillery", storedMatchingCandidates(completion.Result.Distilleries))
-	setStoredCandidates(assign, "region", storedMatchingCandidates(completion.Result.Regions))
-	assign.set("matching_version", completion.Version)
-	assign.set("matched_at", completion.MatchedAt)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("matching 결과 transaction 시작 실패: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	stored, err := lockStoredSelection(ctx, tx, completion.Source.DeclarationID)
+	if err != nil {
+		return err
+	}
+	assign := newColumnAssignments(28)
+	setStoredCandidates(assign, "alcohol", storedMatchingCandidates(completion.Result.Alcohols))
+	setStoredCandidates(assign, "distillery", storedMatchingCandidates(completion.Result.Distilleries))
+	setStoredCandidates(assign, "region", storedMatchingCandidates(completion.Result.Regions))
+	assign.set("matching_version", completion.Version)
+	assign.set("matched_at", completion.MatchedAt)
+	assign.set("matching_run_id", completion.RunID)
+	stored.assignMatcherDecision(assign, completion.Result)
 	result, err := tx.ExecContext(ctx, `
 			UPDATE mfds_declarations
-			SET `+assign.clause()+`,
-			    matching_run_id = ?, alcohol_match_decision = ?,
-			    distillery_match_source = ?, region_match_source = ?,
-			    selected_alcohol_id = COALESCE(selected_alcohol_id, ?),
-			    selected_distillery_id = COALESCE(selected_distillery_id, ?),
-			    selected_region_id = COALESCE(selected_region_id, ?)
+			SET `+assign.clause()+`
 			WHERE id = ? AND rcno = ? AND source_item_id = ?
 		  AND normalization_version = ? AND normalized_at = ?
 		  AND COALESCE(matching_version, '') = ?
 		`, assign.arguments(
-		completion.RunID, completion.Result.AlcoholDecision.Status,
-		completion.Result.DistilleryDecision.Source, completion.Result.RegionDecision.Source,
-		nullablePositiveID(completion.Result.AlcoholDecision.SelectedID),
-		nullablePositiveID(completion.Result.DistilleryDecision.SelectedID),
-		nullablePositiveID(completion.Result.RegionDecision.SelectedID),
 		completion.Source.DeclarationID, completion.Source.RCNO, completion.Source.SourceItemID,
 		completion.Source.NormalizationVersion, completion.Source.NormalizedAt, completion.Source.MatchingVersion,
 	)...)
@@ -257,7 +253,7 @@ func (s *Store) SaveMatchingResult(ctx context.Context, completion usecase.Compl
 	if err := requireOne(result, "matching 결과 저장"); err != nil {
 		return err
 	}
-	if err := saveMatchingRecords(ctx, tx, completion.RunID, completion.Source.DeclarationID, completion.Result, completion.MatchedAt); err != nil {
+	if err := saveMatchingRecords(ctx, tx, completion.RunID, completion.Source.DeclarationID, completion.Result, completion.MatchedAt, stored); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

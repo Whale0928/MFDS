@@ -317,6 +317,14 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	if err != nil {
 		return err
 	}
+	identityKey, err := nullableSHA256(fields.ProductIdentityKeySHA256)
+	if err != nil {
+		return err
+	}
+	stored, err := lockStoredSelection(ctx, tx, completion.Source.DeclarationID)
+	if err != nil {
+		return err
+	}
 
 	assign := newColumnAssignments(62)
 	// 정제 테이블만 조회해도 처리일자를 알 수 있도록 현재 원본의 값을 그대로 옮긴다.
@@ -328,6 +336,7 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	assign.set("name_search_key_ko", nullableString(fields.NameSearchKeyKO))
 	assign.set("name_search_key_en", nullableString(fields.NameSearchKeyEN))
 	assign.set("sku_candidate_key_sha256", key)
+	assign.set("product_identity_key_sha256", identityKey)
 
 	assign.set("volume_raw", nullableString(fields.VolumeRaw))
 	assign.set("volume_ml", nullableInt(fields.VolumeML))
@@ -387,12 +396,14 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	setStoredCandidates(assign, "region", storedNormalizationCandidates(fields.RegionCandidates))
 	assign.set("matching_version", nullableString(fields.MatchingVersion))
 	assign.set("matching_run_id", nullablePositiveID(fields.MatchingRunID))
-	assign.set("alcohol_match_decision", nullableString(string(fields.MatchingResult.AlcoholDecision.Status)))
-	assign.set("distillery_match_source", nullableString(fields.MatchingResult.DistilleryDecision.Source))
-	assign.set("region_match_source", nullableString(fields.MatchingResult.RegionDecision.Source))
-	assign.setExpression("selected_alcohol_id = COALESCE(selected_alcohol_id, ?)", nullablePositiveID(fields.MatchingResult.AlcoholDecision.SelectedID))
-	assign.setExpression("selected_distillery_id = COALESCE(selected_distillery_id, ?)", nullablePositiveID(fields.MatchingResult.DistilleryDecision.SelectedID))
-	assign.setExpression("selected_region_id = COALESCE(selected_region_id, ?)", nullablePositiveID(fields.MatchingResult.RegionDecision.SelectedID))
+	// 같은 키의 관리자 매칭을 그대로 쓴 결과는 자동 매칭보다 우선하므로 기존 자동 선택도 덮어쓴다.
+	inheritedFrom := fields.InheritedFromDeclarationID
+	appliesInheritance := inheritedFrom > 0 && !stored.decision.PreservesSelection()
+	if appliesInheritance {
+		assignInheritedSelection(assign, fields.MatchingResult, inheritedFrom)
+	} else {
+		stored.assignMatcherDecision(assign, fields.MatchingResult)
+	}
 	assign.set("matched_at", completion.NormalizedAt)
 
 	assign.set("manufacture_country_name_ko", nullableString(fields.ManufactureCountryNameKO))
@@ -434,8 +445,14 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	if err := requireNormalizationLease(result, "normalization 결과 저장"); err != nil {
 		return err
 	}
-	if fields.MatchingRunID > 0 {
-		if err := saveMatchingRecords(ctx, tx, fields.MatchingRunID, completion.Source.DeclarationID, fields.MatchingResult, completion.NormalizedAt); err != nil {
+	// 자동 매칭을 건너뛴 행에는 매처 실행 기록이 없으므로 상속 이력만 남긴다.
+	switch {
+	case appliesInheritance:
+		if err := recordInheritedSelection(ctx, tx, completion.Source.DeclarationID, inheritedFrom, fields.MatchingResult); err != nil {
+			return err
+		}
+	case inheritedFrom == 0 && fields.MatchingRunID > 0:
+		if err := saveMatchingRecords(ctx, tx, fields.MatchingRunID, completion.Source.DeclarationID, fields.MatchingResult, completion.NormalizedAt, stored); err != nil {
 			return err
 		}
 	}
@@ -445,57 +462,40 @@ func (s *Store) Complete(ctx context.Context, completion normalization.Completio
 	return nil
 }
 
+// syncImporterLinks resolves every declaration's importer in one statement. Resolving row by row cost several round
+// trips per declaration, which dominated a normalize run against a remote database. The rule is unchanged: an RCNO
+// evidence row whose source importer name equals the ledger name wins, otherwise a single official business with exactly
+// that name links as PAGE_NAME, otherwise the link is cleared. Only rows whose link actually changes are written.
 func (s *Store) syncImporterLinks(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT d.rcno, TRIM(COALESCE(item.importer_name, '')) AS business_name
-		FROM mfds_declarations AS d
+	_, err := tx.ExecContext(ctx, `
+		UPDATE mfds_declarations AS d
 		JOIN mfds_items AS item ON item.id = d.source_item_id
+		LEFT JOIN mfds_importer_rcno_links AS link
+		       ON link.rcno = TRIM(d.rcno)
+		      AND CAST(link.source_importer_name AS BINARY) = CAST(TRIM(item.importer_name) AS BINARY)
+		LEFT JOIN (
+		    SELECT CAST(business_name AS BINARY) AS name_bin, MIN(id) AS importer_id
+		    FROM mfds_importers
+		    GROUP BY CAST(business_name AS BINARY)
+		    HAVING COUNT(*) = 1
+		) AS exact ON exact.name_bin = CAST(TRIM(item.importer_name) AS BINARY)
+		SET d.importer_linked_at = CASE WHEN COALESCE(link.importer_id, exact.importer_id) IS NULL THEN NULL ELSE NOW(6) END,
+		    d.importer_link_source = CASE
+		        WHEN link.importer_id IS NOT NULL THEN link.link_source
+		        WHEN exact.importer_id IS NOT NULL THEN 'PAGE_NAME'
+		    END,
+		    d.importer_id = COALESCE(link.importer_id, exact.importer_id)
 		WHERE NULLIF(TRIM(item.importer_name), '') IS NOT NULL
+		  AND NOT (
+		      d.importer_id <=> COALESCE(link.importer_id, exact.importer_id)
+		      AND d.importer_link_source <=> CASE
+		          WHEN link.importer_id IS NOT NULL THEN link.link_source
+		          WHEN exact.importer_id IS NOT NULL THEN 'PAGE_NAME'
+		      END
+		  )
 	`)
 	if err != nil {
-		return fmt.Errorf("정제 수입사 연결 후보 조회 실패: %w", err)
-	}
-	defer rows.Close()
-	type candidate struct {
-		rcno         string
-		businessName string
-	}
-	candidates := make([]candidate, 0)
-	for rows.Next() {
-		var value candidate
-		if err := rows.Scan(&value.rcno, &value.businessName); err != nil {
-			return fmt.Errorf("정제 수입사 연결 후보 scan 실패: %w", err)
-		}
-		candidates = append(candidates, value)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("정제 수입사 연결 후보 순회 실패: %w", err)
-	}
-
-	for _, candidate := range candidates {
-		importerID, linkSource, err := resolveImporterLink(ctx, tx, candidate.rcno, candidate.businessName)
-		if err != nil {
-			return err
-		}
-		if importerID == nil {
-			linkSource = ""
-		}
-		_, err = tx.ExecContext(ctx, `
-			UPDATE mfds_declarations AS declaration
-			SET declaration.importer_linked_at = CASE
-			        WHEN declaration.importer_id <=> ? AND declaration.importer_link_source <=> ? THEN declaration.importer_linked_at
-			        WHEN ? IS NULL THEN NULL
-			        ELSE NOW(6)
-			    END,
-			    declaration.importer_id = ?,
-			    declaration.importer_link_source = ?
-			WHERE declaration.rcno = ?
-			  AND NOT (declaration.importer_id <=> ? AND declaration.importer_link_source <=> ?)
-		`, importerID, nullableString(linkSource), importerID, importerID, nullableString(linkSource),
-			candidate.rcno, importerID, nullableString(linkSource))
-		if err != nil {
-			return fmt.Errorf("정제 수입사 연결 저장 실패: %w", err)
-		}
+		return fmt.Errorf("정제 수입사 연결 저장 실패: %w", err)
 	}
 	return nil
 }
@@ -643,7 +643,7 @@ func nullableSHA256(value string) ([]byte, error) {
 	}
 	decoded, err := hex.DecodeString(value)
 	if err != nil || len(decoded) != 32 {
-		return nil, errors.New("sku candidate SHA-256은 64자리 hex 문자열이어야 합니다")
+		return nil, errors.New("SHA-256 키는 64자리 hex 문자열이어야 합니다")
 	}
 	return decoded, nil
 }
